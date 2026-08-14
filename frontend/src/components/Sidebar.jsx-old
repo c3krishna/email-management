@@ -1,0 +1,245 @@
+import {
+  BarChart3, Mail, AlertTriangle, Shield, Megaphone,
+  Bell, Activity, Users, Inbox, GitCompare,
+  TrendingUp, List, Clock, Server, Eye,
+  ShieldAlert, Globe, CheckCircle, ChevronDown, ChevronRight
+} from 'lucide-react';
+import { useState } from 'react';
+
+const NAV = [
+  // DASHBOARD
+  { id: 'dashboard',   label: 'Overview',          icon: BarChart3,   section: 'DASHBOARD' },
+
+  // EMAIL LOGS
+  { id: 'email-logs',  label: 'Email Logs',        icon: List,        section: 'EMAIL LOGS' },
+  { id: 'threats',     label: 'Threats',           icon: ShieldAlert, section: 'EMAIL LOGS' },
+  { id: 'delivery-status', label: 'Delivery Status', icon: Clock,     section: 'EMAIL LOGS' },
+
+  // ANALYTICS
+  { id: 'campaigns',   label: 'Campaign Reports',  icon: Megaphone,   section: 'ANALYTICS' },
+  { id: 'compare',     label: 'Queue vs Delivery', icon: GitCompare,  section: 'ANALYTICS' },
+  { id: 'problematic', label: 'Bounce Analysis',   icon: AlertTriangle, section: 'ANALYTICS' },
+
+  // MANAGEMENT
+  { id: 'mails',       label: 'All Mails',         icon: Mail,        section: 'MANAGEMENT' },
+  { id: 'inbox',       label: 'Inbox',             icon: Inbox,       section: 'MANAGEMENT', roles: ['super_admin','admin'] },
+
+  // SECURITY
+  { id: 'spamguard',   label: 'Spam Guard',        icon: Shield,      section: 'SECURITY' },
+  { id: 'ip-reputation', label: 'IP Reputation',   icon: Globe,       section: 'SECURITY', roles: ['super_admin','admin'] },
+
+  // MONITORING
+  { id: 'alerts',      label: 'Alerts & Notify',   icon: Bell,        section: 'MONITORING' },
+
+  // ADMIN
+  { id: 'users',       label: 'User Management',   icon: Users,       section: 'ADMIN', roles: ['super_admin','admin'] },
+];
+
+const ROLE_COLORS = {
+  super_admin: { bg: 'rgba(249,115,22,0.15)', color: '#f97316' },
+  admin:       { bg: 'rgba(96,165,250,0.15)',  color: '#60a5fa' },
+  viewer:      { bg: 'rgba(74,222,128,0.15)',  color: '#4ade80' },
+};
+
+export default function Sidebar({ activePage, onNavigate, alertCount, user, onLogout, agentStatus }) {
+  const [collapsed, setCollapsed] = useState({});
+
+  const sections = [...new Set(NAV.map(n => n.section))];
+
+  const toggleSection = (section) => {
+    setCollapsed(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const visibleItems = (section) => NAV.filter(n => {
+    if (n.section !== section) return false;
+    if (!n.roles) return true;
+    return user?.role && n.roles.includes(user.role);
+  });
+
+  return (
+    <div className="sidebar" style={{ userSelect: 'none' }}>
+
+      {/* Logo */}
+      <div className="sidebar-logo">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 17, flexShrink: 0
+          }}>📧</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Email Management</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>Security Gateway</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Agent status indicators */}
+      {agentStatus && (
+        <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+            Live Agents
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {[
+              { key: 'app',      label: 'mail.worktual.tech' },
+              { key: 'campaign', label: 'mail.worktual.pl'   },
+            ].map(s => {
+              const online = agentStatus?.[s.key]?.online;
+              return (
+                <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: online ? '#4ade80' : '#6b7280',
+                    boxShadow: online ? '0 0 4px #4ade80' : 'none',
+                  }} />
+                  <span style={{ fontSize: 11, color: online ? 'var(--text-primary)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.label}
+                  </span>
+                  {agentStatus?.[s.key]?.queue?.queue_count > 0 && (
+                    <span style={{ marginLeft: 'auto', fontSize: 10, color: '#fbbf24', flexShrink: 0 }}>
+                      {agentStatus[s.key].queue.queue_count}q
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Nav sections */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+        {sections.map(section => {
+          const items = visibleItems(section);
+          if (items.length === 0) return null;
+          const isCollapsed = collapsed[section];
+
+          return (
+            <div key={section}>
+              {/* Section header — clickable to collapse */}
+              <div
+                onClick={() => toggleSection(section)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '8px 16px 4px',
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: 1, textTransform: 'uppercase' }}>
+                  {section}
+                </span>
+                {isCollapsed
+                  ? <ChevronRight size={11} color="var(--text-muted)" />
+                  : <ChevronDown  size={11} color="var(--text-muted)" />
+                }
+              </div>
+
+              {/* Nav items */}
+              {!isCollapsed && items.map(item => {
+                const Icon     = item.icon;
+                const isActive = activePage === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => onNavigate(item.id)}
+                    style={{
+                      borderLeft: isActive ? '3px solid var(--accent-blue)' : '3px solid transparent',
+                      paddingLeft: 13,
+                    }}
+                  >
+                    <Icon size={15} />
+                    <span style={{ fontSize: 13 }}>{item.label}</span>
+                    {item.id === 'alerts' && alertCount > 0 && (
+                      <span style={{
+                        marginLeft: 'auto',
+                        background: 'var(--danger)',
+                        color: 'white', fontSize: 10, fontWeight: 700,
+                        padding: '1px 6px', borderRadius: 10,
+                      }}>{alertCount}</span>
+                    )}
+                    {item.id === 'threats' && (
+                      <span style={{
+                        marginLeft: 'auto',
+                        background: 'rgba(190,24,93,0.2)',
+                        color: '#f472b6', fontSize: 10, fontWeight: 700,
+                        padding: '1px 6px', borderRadius: 10,
+                      }}>NEW</span>
+                    )}
+                    {item.id === 'email-logs' && (
+                      <span style={{
+                        marginLeft: 'auto',
+                        background: 'rgba(22,163,74,0.2)',
+                        color: '#4ade80', fontSize: 9, fontWeight: 700,
+                        padding: '1px 5px', borderRadius: 10,
+                      }}>LIVE</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Bottom: user info + status */}
+      <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+        {user && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: 'linear-gradient(135deg,#2563eb,#7c3aed)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0,
+              }}>
+                {user.name?.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.name}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.email}
+                </div>
+              </div>
+            </div>
+            <span style={{
+              display: 'inline-block', fontSize: 10, fontWeight: 700,
+              padding: '2px 8px', borderRadius: 20,
+              background: ROLE_COLORS[user.role]?.bg || 'rgba(107,114,128,0.2)',
+              color:      ROLE_COLORS[user.role]?.color || '#9ca3af',
+            }}>
+              {user.role?.replace('_',' ').toUpperCase()}
+            </span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <Activity size={11} color="#4ade80" />
+          <span style={{ fontSize: 11, color: '#4ade80' }}>System Online</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
+          Postfix · Dovecot · OpenDKIM<br/>
+          Worktual Innovations, Chennai
+        </div>
+
+        {onLogout && (
+          <button onClick={onLogout} style={{
+            width: '100%', padding: '6px 0', fontSize: 12, fontWeight: 500,
+            background: 'rgba(220,38,38,0.1)', color: '#f87171',
+            border: '1px solid rgba(220,38,38,0.2)', borderRadius: 6,
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}
+            onMouseOver={e => e.currentTarget.style.background = 'rgba(220,38,38,0.2)'}
+            onMouseOut={e  => e.currentTarget.style.background = 'rgba(220,38,38,0.1)'}
+          >
+            Sign Out
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
