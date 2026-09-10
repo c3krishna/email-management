@@ -180,7 +180,11 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
   const [recentLogs,   setRecentLogs]   = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [lastRefresh,  setLastRefresh]  = useState(new Date());
-  const [activeChart,  setActiveChart]  = useState('trend'); // trend | hourly
+  const [activeChart,  setActiveChart]  = useState(range === 'today' ? 'hourly' : 'trend'); // trend | hourly
+
+  useEffect(() => {
+    setActiveChart(range === 'today' ? 'hourly' : 'trend');
+  }, [range]);
 
   const load = useCallback(async () => {
     setLoading(true);

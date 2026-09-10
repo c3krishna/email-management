@@ -1,12 +1,12 @@
 const express = require('express');
 const router  = express.Router();
 const { getPool } = require('../db');
-const { normalizeServer, buildDateFilter } = require('../mailServers');
+const { buildDateFilter } = require('../mailServers');
 
-function poolFor(req) {
-  // Queue vs delivery is primarily a Campaign feature, but honor Topbar when set
-  const s = normalizeServer(req.query.server, 'campaign');
-  return getPool(s === 'all' ? 'campaign' : s);
+function poolFor(_req) {
+  // Queue tables live only on the Campaign metrics DB (email_campaign_queue).
+  // Always use campaign pool — Topbar App view still shows delivery waveform separately.
+  return getPool('campaign');
 }
 
 function queueDateFilter(range, date, from, to) {

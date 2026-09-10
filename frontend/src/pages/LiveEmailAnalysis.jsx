@@ -10,7 +10,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api' });
+const api = axios.create({ baseURL: '/api', timeout: 120000 });
 api.interceptors.request.use(cfg => {
   const t = localStorage.getItem('em_token');
   if (t) cfg.headers['Authorization'] = `Bearer ${t}`;
@@ -274,7 +274,13 @@ export function LiveEmailAnalysis() {
         setVisibleStages(prev => [...prev, data.stages[i]]);
       }
     } catch (e) {
-      setError(e.response?.data?.error || e.message);
+      const status = e.response?.status;
+      const msg = e.response?.data?.error || e.message;
+      if (status === 504 || e.code === 'ECONNABORTED') {
+        setError('Analysis timed out waiting for AI. Retry — high-confidence pattern matches skip the LLM and finish faster.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setAnalyzing(false);
     }

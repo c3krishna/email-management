@@ -185,7 +185,76 @@ router.get('/summary', verifyToken, async (req, res) => {
       GROUP BY server
     `, [parseInt(hours)]);
 
-    res.json({ success: true, data: { stats, trend, topSenders, byServer }, filter: { server, hours } });
+    // Fallback: when milter table empty, surface AI engine indicators + blocked delivery reasons
+    let engineFallback = null;
+    if (Number(stats.total || 0) === 0) {
+      try {
+        const [[eng]] = await pool.query(`
+          SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN threat_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+            SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+            SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+            SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec,
+            0 AS alerts_sent, 0 AS false_positives,
+            SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS unreviewed,
+            AVG(confidence) AS avg_confidence
+          FROM threat_indicators
+          WHERE threat_type IN ('spam','phishing','malware','bec','scam','url_threat')
+            AND (created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+                 OR last_seen_at >= DATE_SUB(NOW(), INTERVAL ? HOUR))
+        `, [parseInt(hours), parseInt(hours)]);
+        if (eng && Number(eng.total || 0) > 0) {
+          engineFallback = eng;
+          Object.assign(stats, eng);
+          stats.source = 'threat_indicators';
+        }
+      } catch {
+        try {
+          const [[eng2]] = await pool.query(`
+            SELECT
+              COUNT(*) AS total,
+              SUM(CASE WHEN threat_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+              SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+              SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+              SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec,
+              0 AS alerts_sent, 0 AS false_positives,
+              SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS unreviewed,
+              AVG(confidence) AS avg_confidence
+            FROM threat_indicators
+            WHERE threat_type IN ('spam','phishing','malware','bec','scam','url_threat')
+          `);
+          if (eng2 && Number(eng2.total || 0) > 0) {
+            engineFallback = eng2;
+            Object.assign(stats, eng2);
+            stats.source = 'threat_indicators';
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (engineFallback && (!trend || !trend.length)) {
+        try {
+          const [engTrend] = await pool.query(`
+            SELECT DATE(COALESCE(last_seen_at, created_at)) AS date, COUNT(*) AS total,
+              SUM(CASE WHEN threat_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+              SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+              SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+              SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec
+            FROM threat_indicators
+            WHERE threat_type IN ('spam','phishing','malware','bec','scam','url_threat')
+              AND COALESCE(last_seen_at, created_at) >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY DATE(COALESCE(last_seen_at, created_at)) ORDER BY date ASC
+          `);
+          if (engTrend?.length) trend.splice(0, trend.length, ...engTrend);
+        } catch { /* ignore */ }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: { stats, trend, topSenders, byServer, engineFallback },
+      filter: { server, hours },
+    });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }

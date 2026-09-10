@@ -87,6 +87,14 @@ pm2 save
 
 `ecosystem.config.js` only sets `NODE_ENV` / `PORT` — secrets come from `.env` via dotenv.
 
+After pulling AI/orchestration fixes, reload nginx so `/api/orchestration/` gets the 180s proxy timeout:
+
+```bash
+sudo cp /var/www/email-management/nginx.conf /etc/nginx/sites-available/email-management
+sudo nginx -t && sudo systemctl reload nginx
+pm2 restart email-mgmt-api
+```
+
 ### 2.4 Frontend build
 
 ```bash

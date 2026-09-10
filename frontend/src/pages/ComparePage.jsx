@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, AlertTriangle, CheckCircle, Download, Search } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, Cell
+  Tooltip, Legend, ResponsiveContainer, Cell,
+  AreaChart, Area,
 } from 'recharts';
 import axios from 'axios';
 
@@ -33,6 +34,7 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
   const [summary,    setSummary]    = useState([]);
   const [missing,    setMissing]    = useState([]);
   const [mismatch,   setMismatch]   = useState([]);
+  const [hourly,     setHourly]     = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [activeTab,  setActiveTab]  = useState('overview');
   const [selectedCampaign, setSelectedCampaign] = useState('');
@@ -40,26 +42,42 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
   const [missingPage,   setMissingPage]   = useState(1);
   const [missingTotal,  setMissingTotal]  = useState(0);
 
+  // Queue tables are Campaign-only; delivery waveform uses Topbar server
+  const queueServer = 'campaign';
+  const waveServer  = server || 'app';
+
   const buildParams = useCallback((extra = {}) => {
-    const p = { range, server: server || 'campaign', ...extra };
+    const p = { range, server: queueServer, ...extra };
     if (range === 'today') p.date = selectedDate;
     if (range === 'custom') { p.from = dateFrom; p.to = dateTo; }
     if (selectedCampaign) p.campaign_id = selectedCampaign;
     return p;
-  }, [range, selectedDate, dateFrom, dateTo, selectedCampaign, server]);
+  }, [range, selectedDate, dateFrom, dateTo, selectedCampaign]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, s] = await Promise.all([
-        api.get('/compare/campaigns', { params: { range, server: server || 'campaign', ...(range === 'today' ? { date: selectedDate } : {}), ...(range === 'custom' ? { from: dateFrom, to: dateTo } : {}) } }),
+      const [c, s, h] = await Promise.all([
+        api.get('/compare/campaigns', { params: { range, server: queueServer, ...(range === 'today' ? { date: selectedDate } : {}), ...(range === 'custom' ? { from: dateFrom, to: dateTo } : {}) } }),
         api.get('/compare/summary',   { params: buildParams() }),
+        api.get('/stats/hourly', { params: { date: selectedDate, range, server: waveServer } }).catch(() => ({ data: { data: [] } })),
       ]);
-      setCampaigns(c.data.data);
-      setSummary(s.data.data);
+      setCampaigns(c.data.data || []);
+      setSummary(s.data.data || []);
+      const rawHourly = h.data?.data || [];
+      setHourly(Array.from({ length: 24 }, (_, hour) => {
+        const row = rawHourly.find(r => Number(r.hour) === hour) || {};
+        return {
+          hour: `${String(hour).padStart(2, '0')}:00`,
+          delivered: Number(row.success || 0),
+          failed: Number(row.failed || 0),
+          bounced: Number(row.bounced || 0),
+          total: Number(row.total || 0),
+        };
+      }));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [buildParams, range, server, selectedDate, dateFrom, dateTo]);
+  }, [buildParams, range, waveServer, selectedDate, dateFrom, dateTo]);
 
   const loadMissing = useCallback(async (pg = 1) => {
     try {
@@ -134,7 +152,8 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
             Matching <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>email_campaign_queue.message_id</code>
             {' '}↔{' '}
             <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>email_delivery_details.message_id</code>
-            {' · '}Campaign server 10.180.0.203
+            {' · '}Campaign metrics DB
+            {waveServer === 'app' && ' · Delivery waveform uses App Mail (Topbar)'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -165,6 +184,16 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
           sub="In queue-sent, missing delivery record"
         />
       </div>
+
+      {totals.queued === 0 && (
+        <div style={{
+          background: 'rgba(37,99,235,0.08)', border: '1px solid rgba(37,99,235,0.25)',
+          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--text-muted)',
+        }}>
+          No campaign queue rows for this date on the Campaign metrics DB.
+          Delivery waveform below still reflects {waveServer === 'campaign' ? 'Campaign' : 'App'} mail traffic from Topbar.
+        </div>
+      )}
 
       {/* Alert if missing records found */}
       {totals.not_tracked > 0 && (
@@ -211,8 +240,43 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
         <>
           <div className="card mb-20" style={{ marginTop: 16 }}>
             <div className="card-header">
+              <span className="card-title">
+                Delivery waveform ({waveServer === 'campaign' ? 'Campaign' : 'App'} · hourly)
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={hourly} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gwDel" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={S.success} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={S.success} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gwFail" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={S.failed} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={S.failed} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="hour" tick={{ fill: '#6e7681', fontSize: 10 }} interval={2} />
+                <YAxis tick={{ fill: '#6e7681', fontSize: 11 }} allowDecimals={false} />
+                <Tooltip contentStyle={TT} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Area type="monotone" dataKey="delivered" stroke={S.success} fill="url(#gwDel)" strokeWidth={2} name="Delivered" />
+                <Area type="monotone" dataKey="failed" stroke={S.failed} fill="url(#gwFail)" strokeWidth={2} name="Failed" />
+                <Area type="monotone" dataKey="bounced" stroke={S.bounced} fill="transparent" strokeWidth={2} name="Bounced" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="card mb-20">
+            <div className="card-header">
               <span className="card-title">Queue vs delivery match by campaign</span>
             </div>
+            {chartData.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                No campaign queue data for this range.
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 50 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -225,6 +289,7 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo, ser
                 <Bar dataKey="Not Tracked"    fill={S.missing}  stackId={undefined} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
 
           {/* Summary stats by status */}

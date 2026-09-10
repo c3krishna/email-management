@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mysql = require('mysql2/promise');
 const { getPool } = require('../db');
 const {
   normalizeServer,
@@ -7,6 +8,21 @@ const {
   buildDirectionSql,
   istToday,
 } = require('../mailServers');
+
+let platformPool = null;
+function getPlatformPool() {
+  if (!platformPool) {
+    platformPool = mysql.createPool({
+      host: process.env.DB_HOST || '10.180.0.84',
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.PLATFORM_DB || 'threat_platform',
+      waitForConnections: true,
+      connectionLimit: 5,
+    });
+  }
+  return platformPool;
+}
 
 // ---- helpers ----
 
@@ -389,6 +405,38 @@ router.get('/enhanced-summary', async (req, res) => {
     `, params);
 
     const t = await maybeRealtimeFallback(pool, today[0], range, date, from, to, server);
+
+    // Enrich threats KPI from spam_detections + threat_indicators when delivery reasons empty
+    if (Number(t.threats || 0) === 0) {
+      try {
+        const plat = getPlatformPool();
+        const hours = range === 'today' ? 24 : range === '30d' ? 720 : 168;
+        const srv = normalizeServer(server, 'app');
+        let threatCount = 0;
+        if (srv === 'all') {
+          const [[sd]] = await plat.query(
+            `SELECT COUNT(*) AS c FROM spam_detections WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+            [hours]
+          );
+          threatCount = Number(sd?.c || 0);
+        } else {
+          const [[sd]] = await plat.query(
+            `SELECT COUNT(*) AS c FROM spam_detections
+             WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) AND server = ?`,
+            [hours, srv]
+          );
+          threatCount = Number(sd?.c || 0);
+        }
+        if (!threatCount) {
+          const [[ti]] = await plat.query(
+            `SELECT COUNT(*) AS c FROM threat_indicators
+             WHERE status='active' AND threat_type IN ('spam','phishing','malware','bec','url_threat')`
+          );
+          threatCount = Number(ti?.c || 0);
+        }
+        t.threats = threatCount;
+      } catch { /* optional enrichment */ }
+    }
 
     const [yesterday] = await pool.query(`
       SELECT

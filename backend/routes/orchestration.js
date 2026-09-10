@@ -30,7 +30,7 @@ function getPool() {
 // AI calls to MiniAI Ollama (see ../aiConfig.js), and returns
 const { OLLAMA_URL, AI_MODEL, AI_MODEL_DEEP, AI_MODELS } = require('../aiConfig');
 
-async function ollamaGenerate(model, prompt, options = {}) {
+async function ollamaGenerate(model, prompt, options = {}, timeoutMs = 25000) {
   const r = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -40,7 +40,7 @@ async function ollamaGenerate(model, prompt, options = {}) {
       stream: false,
       options: { temperature: 0.05, num_predict: 200, ...options },
     }),
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!r.ok) throw new Error(`Ollama ${r.status}`);
   return r.json();
@@ -110,12 +110,14 @@ Respond with JSON only:
 {"is_spam": true/false, "spam_type": "phishing/scam/malware/bec/spam/legitimate", "confidence": 0-100, "reason": "one sentence", "mitre": "MITRE ATT&CK technique ID if applicable or null"}`;
 
   try {
-    // Prefer deep model for orchestration; fall back to primary
+    // Live analyze must finish under nginx proxy timeout (~60–180s).
+    // Prefer fast primary (Qwen 14B); only briefly try deep model if primary fails.
     let data;
     try {
-      data = await ollamaGenerate(AI_MODEL_DEEP, prompt, { num_predict: 280 });
-    } catch {
-      data = await ollamaGenerate(AI_MODEL, prompt, { num_predict: 200 });
+      data = await ollamaGenerate(AI_MODEL, prompt, { num_predict: 180 }, 28000);
+    } catch (primaryErr) {
+      console.warn('[orchestration] primary AI failed, trying deep briefly:', primaryErr.message);
+      data = await ollamaGenerate(AI_MODEL_DEEP, prompt, { num_predict: 120 }, 12000);
     }
     const text = data.response || '';
     const match = text.match(/\{[^}]+\}/s);
@@ -127,7 +129,7 @@ Respond with JSON only:
       confidence: Math.min(100, Math.max(0, parseInt(parsed.confidence) || 0)),
       reason:     (parsed.reason || '').slice(0, 300),
       mitre:      parsed.mitre || null,
-      model:      data.model || AI_MODEL_DEEP,
+      model:      data.model || AI_MODEL,
     };
   } catch (e) {
     console.error('[orchestration] AI classify error:', e.message);
@@ -286,11 +288,27 @@ router.post('/analyze', verifyToken, async (req, res) => {
     // ── Stage 5B/AI: Run real AI classification ────────────
     t = stageStart();
     let aiResult = null;
-    const shouldRunAI = (patternMatch && patternMatch.conf >= 50) || typosquat || isBlacklisted || (!patternMatch);
+    // Strong pattern hits skip LLM to avoid gateway timeouts on live analyze
+    const strongPattern = patternMatch && patternMatch.conf >= 85;
+    const shouldRunAI = !strongPattern && (
+      (patternMatch && patternMatch.conf >= 50) || typosquat || isBlacklisted || (!patternMatch)
+    );
     if (shouldRunAI) {
       aiResult = await aiClassify(cleanEvent.subject, cleanEvent.sender, cleanEvent.body);
+    } else if (strongPattern) {
+      aiResult = {
+        is_spam: true,
+        spam_type: patternMatch.type,
+        confidence: patternMatch.conf,
+        reason: `High-confidence pattern match (${patternMatch.conf}%) — LLM skipped for latency`,
+        mitre: null,
+        model: 'pattern',
+      };
     }
-    stageEnd('ai-analysis', `AI Deep Analysis (${AI_MODELS.label} / ${AI_MODEL_DEEP})`, '🤖',
+    const aiLabel = aiResult?.model === 'pattern'
+      ? 'Pattern (LLM skipped)'
+      : `${AI_MODELS.label}${aiResult?.model && aiResult.model !== AI_MODEL ? ` / ${aiResult.model}` : ''}`;
+    stageEnd('ai-analysis', `AI Analysis (${aiLabel})`, '🤖',
       aiResult ? 'complete' : 'skipped',
       aiResult
         ? (aiResult.is_spam

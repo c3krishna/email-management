@@ -297,6 +297,89 @@ router.get('/summary', verifyToken, async (req, res) => {
       WHERE event_datetime >= DATE_SUB(NOW(), INTERVAL ? HOUR)
     `, [parseInt(hours)]);
 
+    // AI Threat Engine indicators (same store as Threat Management page)
+    let engine = {
+      total: 0, active: 0, phishing: 0, spam: 0, malware: 0, bec: 0, url_threat: 0,
+      critical: 0, high: 0, last_24h: 0,
+    };
+    try {
+      const [[eng]] = await p.query(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active,
+          SUM(CASE WHEN threat_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+          SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+          SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+          SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec,
+          SUM(CASE WHEN threat_type='url_threat' THEN 1 ELSE 0 END) AS url_threat,
+          SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END) AS critical,
+          SUM(CASE WHEN severity='high' THEN 1 ELSE 0 END) AS high,
+          SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS last_24h
+        FROM threat_indicators
+      `);
+      if (eng) engine = eng;
+    } catch { /* threat_indicators may differ */ }
+
+    // Spam milter detections in window
+    let spamDetections = { total: 0, phishing: 0, spam: 0, malware: 0, bec: 0 };
+    try {
+      const [[sd]] = await p.query(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN spam_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+          SUM(CASE WHEN spam_type='spam' THEN 1 ELSE 0 END) AS spam,
+          SUM(CASE WHEN spam_type='malware' THEN 1 ELSE 0 END) AS malware,
+          SUM(CASE WHEN spam_type='bec' THEN 1 ELSE 0 END) AS bec
+        FROM spam_detections
+        WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+      `, [parseInt(hours)]);
+      if (sd) spamDetections = sd;
+    } catch { /* optional */ }
+
+    // Real trend: prefer security_events, else spam_detections by day
+    let threatTrend = [];
+    try {
+      const [evTrend] = await p.query(`
+        SELECT DATE(event_datetime) AS date,
+          SUM(CASE WHEN threat_category='phishing' THEN 1 ELSE 0 END) AS phishing,
+          SUM(CASE WHEN threat_category='spam' THEN 1 ELSE 0 END) AS spam,
+          SUM(CASE WHEN threat_category='malware' THEN 1 ELSE 0 END) AS malware,
+          SUM(CASE WHEN threat_category='bec' THEN 1 ELSE 0 END) AS bec
+        FROM security_events
+        WHERE event_datetime >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+          AND threat_category IS NOT NULL
+        GROUP BY DATE(event_datetime) ORDER BY date ASC
+      `);
+      threatTrend = evTrend || [];
+      if (!threatTrend.length) {
+        const [spTrend] = await p.query(`
+          SELECT DATE(detected_at) AS date,
+            SUM(CASE WHEN spam_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+            SUM(CASE WHEN spam_type='spam' THEN 1 ELSE 0 END) AS spam,
+            SUM(CASE WHEN spam_type='malware' THEN 1 ELSE 0 END) AS malware,
+            SUM(CASE WHEN spam_type='bec' THEN 1 ELSE 0 END) AS bec
+          FROM spam_detections
+          WHERE detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+          GROUP BY DATE(detected_at) ORDER BY date ASC
+        `);
+        threatTrend = spTrend || [];
+      }
+    } catch { /* ignore */ }
+
+    // When connector events are empty, surface engine + spam counts in KPIs
+    const mergedStats = { ...stats };
+    if (Number(stats.total_events || 0) === 0) {
+      mergedStats.total_events = Number(engine.active || engine.total || 0) + Number(spamDetections.total || 0);
+      mergedStats.phishing = Number(engine.phishing || 0) + Number(spamDetections.phishing || 0);
+      mergedStats.spam = Number(engine.spam || 0) + Number(spamDetections.spam || 0);
+      mergedStats.malware = Number(engine.malware || 0) + Number(spamDetections.malware || 0);
+      mergedStats.bec = Number(engine.bec || 0) + Number(spamDetections.bec || 0);
+      mergedStats.url_threats = Number(engine.url_threat || 0);
+      mergedStats.source = 'engine+spam';
+    } else {
+      mergedStats.source = 'connectors';
+    }
+
     const [byCustomer] = await p.query(`
       SELECT c.name AS customer_name, c.id AS customer_id,
              se.platform, COUNT(*) AS events,
@@ -325,7 +408,32 @@ router.get('/summary', verifyToken, async (req, res) => {
       ORDER BY count DESC LIMIT 10
     `, [parseInt(hours)]);
 
-    res.json({ success:true, data:{ stats, byCustomer, byPlatform, topThreats } });
+    // Top indicators when connector topThreats empty
+    let topIndicators = [];
+    if (!topThreats.length) {
+      try {
+        const [ti] = await p.query(`
+          SELECT indicator_value AS mail_from, threat_type AS threat_category, occurrence_count AS count
+          FROM threat_indicators
+          WHERE status='active'
+          ORDER BY occurrence_count DESC LIMIT 10
+        `);
+        topIndicators = ti || [];
+      } catch { /* ignore */ }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        stats: mergedStats,
+        engine,
+        spamDetections,
+        threatTrend,
+        byCustomer,
+        byPlatform,
+        topThreats: topThreats.length ? topThreats : topIndicators,
+      },
+    });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 

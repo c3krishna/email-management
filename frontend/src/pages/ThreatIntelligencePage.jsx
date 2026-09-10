@@ -389,16 +389,19 @@ export default function ThreatIntelligencePage() {
   const byCustomer = summary?.byCustomer || [];
   const byPlatform = summary?.byPlatform || [];
   const topThreats = summary?.topThreats || [];
+  const engine     = summary?.engine || {};
+  const spamDet    = summary?.spamDetections || {};
 
-  // Build trend data from byCustomer grouped by date (placeholder)
-  const trendData = [
-    { date:'Mon', phishing:12, spam:8,  malware:3, bec:1 },
-    { date:'Tue', phishing:18, spam:14, malware:5, bec:2 },
-    { date:'Wed', phishing:9,  spam:11, malware:2, bec:4 },
-    { date:'Thu', phishing:21, spam:16, malware:7, bec:1 },
-    { date:'Fri', phishing:15, spam:9,  malware:4, bec:3 },
-    { date:'Sat', phishing:6,  spam:4,  malware:1, bec:0 },
-    { date:'Sun', phishing:8,  spam:6,  malware:2, bec:1 },
+  // Real trend from API (connectors or spam); fall back to empty series
+  const threatTrend = (summary?.threatTrend || []).map(r => ({
+    date: typeof r.date === 'string' ? r.date : (r.date ? String(r.date).slice(0, 10) : ''),
+    phishing: Number(r.phishing || 0),
+    spam:     Number(r.spam || 0),
+    malware:  Number(r.malware || 0),
+    bec:      Number(r.bec || 0),
+  }));
+  const trendData = threatTrend.length ? threatTrend : [
+    { date: '—', phishing: 0, spam: 0, malware: 0, bec: 0 },
   ];
 
   const pieData = [
@@ -427,6 +430,21 @@ export default function ThreatIntelligencePage() {
           </div>
           <div className="section-sub">
             Virus Rescuers · Multi-customer · Cross-platform · AI-powered
+            {Number(engine.total || 0) > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · AI Engine: {Number(engine.active || engine.total).toLocaleString()} indicators
+              </span>
+            )}
+            {Number(spamDet.total || 0) > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · Spam milter: {Number(spamDet.total).toLocaleString()} detections
+              </span>
+            )}
+            {stats.source === 'engine+spam' && (
+              <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>
+                (connector events empty — showing engine/spam counts)
+              </span>
+            )}
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
@@ -484,7 +502,7 @@ export default function ThreatIntelligencePage() {
             <div className="card-header">
               <span className="card-title">Threat trend (7 days)</span>
               <span style={{ fontSize:11, color:'var(--text-muted)' }}>
-                All customers · All platforms
+                {threatTrend.length ? 'Live · connectors / spam detections' : 'No trend data yet'}
               </span>
             </div>
             <ResponsiveContainer width="100%" height={240}>

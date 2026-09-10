@@ -3,6 +3,7 @@ import { RefreshCw, Shield, AlertTriangle, CheckCircle,
          Plus, Trash2, Download, Eye, X } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts';
@@ -69,7 +70,7 @@ function ConfidenceBadge({ value }) {
 
 export default function SpamAnalysisPage({ server }) {
   const [activeTab,   setActiveTab]   = useState('overview');
-  const [hours,       setHours]       = useState(24);
+  const [hours,       setHours]       = useState(168);
   const [summary,     setSummary]     = useState(null);
   const [detections,  setDetections]  = useState([]);
   const [rules,       setRules]       = useState([]);
@@ -94,10 +95,16 @@ export default function SpamAnalysisPage({ server }) {
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.get('/spam/summary', { params:{ hours, server: server || 'all' } });
-      setSummary(r.data.data);
+      // Prefer Topbar server; if empty, retry with all so App filter doesn't hide Campaign detections
+      let r = await api.get('/spam/summary', { params:{ hours, server: server || 'all' } });
+      let data = r.data.data;
+      if (server && server !== 'all' && Number(data?.stats?.total || 0) === 0) {
+        r = await api.get('/spam/summary', { params:{ hours, server: 'all' } });
+        data = r.data.data;
+        if (data?.stats) data.stats.filterNote = `No ${server} rows — showing all servers`;
+      }
+      setSummary(data);
     } catch(e) {
-      // Tables may not exist yet — show empty state
       setSummary(null);
     } finally { setLoading(false); }
   }, [hours, server]);
@@ -112,7 +119,7 @@ export default function SpamAnalysisPage({ server }) {
       setTotal(r.data.total || 0);
     } catch(e) { setDetections([]); }
     finally { setLoading(false); }
-  }, [hours, typeFilter, page]);
+  }, [hours, typeFilter, page, server]);
 
   const loadRules = useCallback(async () => {
     try {
@@ -193,6 +200,7 @@ export default function SpamAnalysisPage({ server }) {
   ].filter(d => d.value > 0);
 
   const noData = !summary || Number(stats.total||0) === 0;
+  const fromEngine = stats.source === 'threat_indicators';
 
   return (
     <div>
@@ -211,6 +219,8 @@ export default function SpamAnalysisPage({ server }) {
           <div className="section-title">Spam Analysis</div>
           <div className="section-sub">
             AI-powered spam detection · Pattern matching + Ollama (Qwen2.5 14B / 7B milter) · Real-time alerts
+            {fromEngine && ' · Counts from AI Threat Engine indicators (milter empty)'}
+            {stats.filterNote && ` · ${stats.filterNote}`}
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
@@ -272,18 +282,17 @@ export default function SpamAnalysisPage({ server }) {
                 Spam Detection Engine
               </div>
               <div style={{ fontSize:13, color:'var(--text-muted)', marginBottom:20 }}>
-                No detections yet. Deploy the spam milter on the mail server to start detecting.
+                No detections in this window. Deploy / restart the spam milter on App &amp; Campaign mail hosts, or widen the time range.
               </div>
               <div style={{ background:'var(--bg-primary)', borderRadius:8,
-                padding:16, textAlign:'left', maxWidth:500, margin:'0 auto' }}>
+                padding:16, textAlign:'left', maxWidth:560, margin:'0 auto' }}>
                 <div style={{ fontSize:12, fontWeight:600, marginBottom:8,
-                  color:'var(--text-muted)' }}>Quick deploy on 10.180.0.84:</div>
+                  color:'var(--text-muted)' }}>Deploy from agents-app / agents-campaign:</div>
                 <pre style={{ fontSize:11, color:'#4ade80', fontFamily:'var(--font-mono)',
                   margin:0, lineHeight:1.8 }}>{
-`pip3 install pymilter requests mysql-connector-python
-scp spam_milter.py root@10.180.0.84:/opt/spam-detector/
-pm2 start /opt/spam-detector/spam_milter.py \\
-  --interpreter python3 --name spam-milter`}
+`cd agents-app && ./pm2-migrate.sh
+cd agents-campaign && ./pm2-migrate.sh
+# Ensure Postfix smtpd_milters includes inet:127.0.0.1:8891`}
                 </pre>
               </div>
             </div>
@@ -295,18 +304,29 @@ pm2 start /opt/spam-detector/spam_milter.py \\
                   <span className="card-title">Spam detection trend (30 days)</span>
                 </div>
                 <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={trend} margin={{ top:4,right:8,left:-20,bottom:0 }}>
+                  <AreaChart data={trend.length ? trend : [{ date:'—', phishing:0, spam:0, malware:0, bec:0 }]}
+                    margin={{ top:4,right:8,left:-20,bottom:0 }}>
+                    <defs>
+                      <linearGradient id="spPh" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={SPAM_COLORS.phishing} stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor={SPAM_COLORS.phishing} stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="spSp" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={SPAM_COLORS.spam} stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor={SPAM_COLORS.spam} stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
                     <XAxis dataKey="date" tick={{ fill:'#6e7681', fontSize:9 }}
-                      tickFormatter={v=>v?.slice(5)||''}/>
+                      tickFormatter={v=>String(v||'').slice(5)}/>
                     <YAxis tick={{ fill:'#6e7681', fontSize:9 }} allowDecimals={false}/>
                     <Tooltip contentStyle={TT}/>
                     <Legend wrapperStyle={{ fontSize:10 }}/>
-                    <Line type="monotone" dataKey="phishing" stroke={SPAM_COLORS.phishing} strokeWidth={2} dot={false} name="Phishing"/>
-                    <Line type="monotone" dataKey="spam"     stroke={SPAM_COLORS.spam}     strokeWidth={2} dot={false} name="Spam"/>
+                    <Area type="monotone" dataKey="phishing" stroke={SPAM_COLORS.phishing} fill="url(#spPh)" strokeWidth={2} name="Phishing"/>
+                    <Area type="monotone" dataKey="spam"     stroke={SPAM_COLORS.spam}     fill="url(#spSp)" strokeWidth={2} name="Spam"/>
                     <Line type="monotone" dataKey="malware"  stroke={SPAM_COLORS.malware}  strokeWidth={2} dot={false} name="Malware"/>
                     <Line type="monotone" dataKey="bec"      stroke={SPAM_COLORS.bec}      strokeWidth={2} dot={false} name="BEC"/>
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
 
