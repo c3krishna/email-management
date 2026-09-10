@@ -189,15 +189,16 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
       if (range === 'today') p.date = selectedDate;
       if (range === 'custom') { p.from = dateFrom; p.to = dateTo; }
 
-      const trendRange = range === '30d' ? '30d' : '7d';
+      // Charts use the same Topbar range as KPIs (no silent 7d override)
+      const chartParams = { ...p };
 
       const [s, t, h, ts, tr, wh, th, rl] = await Promise.all([
         statsApi.getEnhancedSummary ? statsApi.getEnhancedSummary(p) : statsApi.getSummary(p),
-        statsApi.getTrend({ range: trendRange, server }),
-        statsApi.getHourly({ date: selectedDate, server }),
+        statsApi.getTrend(chartParams),
+        statsApi.getHourly({ date: selectedDate || p.date, server, range }),
         statsApi.getTopSenders({ ...p, limit: 8 }),
         statsApi.getTopRecipients({ ...p, limit: 8 }),
-        statsApi.getWrongHitsTrend({ range: trendRange, server }),
+        statsApi.getWrongHitsTrend(chartParams),
         statsApi.getThreatBreakdown(p),
         statsApi.getRecentLogs({ ...p, limit: 20 }),
       ]);
@@ -295,6 +296,17 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
       </div>
 
       {/* ---- KPI Row 1: Main metrics ---- */}
+      {totalEmails === 0 && !loading && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 10, marginBottom: 4,
+          background: 'rgba(234,88,12,0.08)', border: '1px solid rgba(234,88,12,0.25)',
+          fontSize: 13, color: 'var(--text-muted)',
+        }}>
+          No delivery records for this {range === 'today' ? 'day' : 'range'} on {serverLabel}.
+          {summary?.fallback === false ? ' Charts below only show days that have data.' : ''}
+          {range === 'today' ? ' Try 7 Days or 30 Days if Campaign traffic ran earlier this week.' : ''}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
         <KpiCard label="Total Emails"     value={totalEmails}             icon={Mail}         color={C.blue}   vsYesterday={vs.total}       pulse />
         <KpiCard label="Inbound"          value={summary?.inbound}        icon={Inbox}        color={C.cyan}   sub="Received"               />
@@ -322,14 +334,15 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Email Traffic Overview</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                {range === '30d' ? '30-day' : '7-day'} delivery vs failures trend
+                {range === 'today' ? 'Today' : range === '30d' ? '30-day' : range === 'custom' ? 'Custom range' : '7-day'} delivery vs failures trend
+                {summary?.fallback ? ' · live log fallback' : ''}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               {['trend', 'hourly'].map(c => (
                 <button key={c} className={`btn btn-sm ${activeChart === c ? 'btn-primary' : 'btn-ghost'}`}
                   onClick={() => setActiveChart(c)}>
-                  {c === 'trend' ? '7-Day' : 'Hourly'}
+                  {c === 'trend' ? (range === 'today' ? 'By Day' : range === '30d' ? '30-Day' : range === 'custom' ? 'Range' : '7-Day') : 'Hourly'}
                 </button>
               ))}
             </div>

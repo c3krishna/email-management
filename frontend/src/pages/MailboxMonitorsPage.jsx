@@ -12,7 +12,7 @@ api.interceptors.request.use(cfg => {
 const EMPTY_FORM = {
   display_name: '', imap_host: 'imap.gmail.com', imap_port: 993, imap_user: '', imap_pass: '',
   folder: 'INBOX', use_ssl: true, poll_interval: 120,
-  notify_emails: '',
+  notify_emails: '', mail_server: 'app',
 };
 
 export default function MailboxMonitorsPage() {
@@ -234,6 +234,15 @@ export default function MailboxMonitorsPage() {
                 value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}/>
             </div>
           ))}
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Mail server</label>
+            <select className="input" style={{ marginTop: 4 }} value={form.mail_server}
+              onChange={e => setForm(f => ({ ...f, mail_server: e.target.value }))}>
+              <option value="app">App — mail.worktual.tech</option>
+              <option value="campaign">Campaign — mail.worktual.pl</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
           <div>
             <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Port</label>
             <input className="input" style={{ marginTop: 4 }} type="number" value={form.imap_port}

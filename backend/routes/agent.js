@@ -8,6 +8,8 @@ const router = express.Router();
 
 // We use CommonJS here since backend uses require()
 const { getPool } = require('../db');
+const { detectVipImpersonation } = require('../vipDetect');
+const { getThreatPool } = require('../threatDb');
 
 
 // Decode RFC2047 encoded subjects (=?utf-8?q?...?= or =?utf-8?b?...?=)
@@ -322,6 +324,15 @@ async function processEvent(pool, event, server) {
         SET subject = ?
         WHERE queue_id = ? AND (subject IS NULL OR subject = '')
       `, [event.subject, event.queue_id]).catch(() => {});
+    }
+    // VIP impersonation check on inbound-looking messages with a From header
+    if (event.mail_from && (event.direction === 'inbound' || event.event_type === 'received' || !event.direction)) {
+      detectVipImpersonation(getThreatPool(), {
+        mail_from: event.mail_from,
+        mail_to: event.mail_to,
+        subject: event.subject,
+        mail_server: server === 'campaign' ? 'campaign' : 'app',
+      }).catch(e => console.warn('[vip-detect]', e.message));
     }
   } catch (err) {
     // Ignore duplicate key errors

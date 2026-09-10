@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   RefreshCw, Send, Trash2, Reply, Plus, Search,
-  Inbox, Mail, ChevronRight, X, Paperclip, ArrowLeft
+  Inbox, Mail, ChevronRight, X, Paperclip
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -12,8 +12,7 @@ api.interceptors.request.use(cfg => {
   return cfg;
 });
 
-// ---- Compose Modal ----
-function ComposeModal({ onClose, onSent, replyTo = null }) {
+function ComposeModal({ onClose, onSent, replyTo = null, mailboxId, server }) {
   const [form, setForm]   = useState({
     to:      replyTo?.from || '',
     cc:      '',
@@ -35,6 +34,8 @@ function ComposeModal({ onClose, onSent, replyTo = null }) {
     try {
       await api.post('/inbox/send', {
         ...form,
+        mailbox_id: mailboxId,
+        server,
         reply_to_message_id: replyTo?.message_id,
         reply_to_subject:    replyTo?.subject,
       });
@@ -50,13 +51,10 @@ function ComposeModal({ onClose, onSent, replyTo = null }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', zIndex: 1000, padding: 20 }}>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, width: 560, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}>
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', borderRadius: '12px 12px 0 0' }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{replyTo ? '↩ Reply' : '✉ New Message'}</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={16} /></button>
         </div>
-
-        {/* Fields */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
           {[
             { key: 'to',      label: 'To',      required: true },
@@ -75,8 +73,6 @@ function ComposeModal({ onClose, onSent, replyTo = null }) {
             </div>
           ))}
         </div>
-
-        {/* Body */}
         <textarea
           style={{
             flex: 1, padding: '16px 20px', background: 'none', border: 'none', outline: 'none',
@@ -87,8 +83,6 @@ function ComposeModal({ onClose, onSent, replyTo = null }) {
           value={form.body}
           onChange={e => set('body', e.target.value)}
         />
-
-        {/* Footer */}
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
           {error && <span style={{ fontSize: 12, color: '#f87171', flex: 1 }}>❌ {error}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -104,7 +98,6 @@ function ComposeModal({ onClose, onSent, replyTo = null }) {
   );
 }
 
-// ---- Message List Item ----
 function MessageItem({ msg, selected, onClick }) {
   const isUnread = !msg.seen;
   return (
@@ -138,8 +131,11 @@ function MessageItem({ msg, selected, onClick }) {
   );
 }
 
-// ---- Main InboxPage ----
-export default function InboxPage({ currentUser }) {
+export default function InboxPage({ currentUser, server = 'app' }) {
+  const [customers,    setCustomers]    = useState([]);
+  const [mailboxes,    setMailboxes]    = useState([]);
+  const [customerId,   setCustomerId]   = useState('');
+  const [mailboxId,    setMailboxId]    = useState('');
   const [folders,      setFolders]      = useState([]);
   const [activeFolder, setActiveFolder] = useState('INBOX');
   const [messages,     setMessages]     = useState([]);
@@ -153,46 +149,79 @@ export default function InboxPage({ currentUser }) {
   const [page,         setPage]         = useState(1);
   const [pagination,   setPagination]   = useState({ total: 0, pages: 0 });
   const [unread,       setUnread]       = useState(0);
+  const [loadError,    setLoadError]    = useState(null);
   const searchRef = useRef(null);
 
-  // Load folders on mount
+  const mbParams = useCallback(() => ({
+    mailbox_id: mailboxId || (server === 'campaign' ? 'admin-campaign' : 'admin-app'),
+    server,
+  }), [mailboxId, server]);
+
+  // Load mailbox catalog when server / customer changes
   useEffect(() => {
-    api.get('/inbox/folders').then(r => {
+    setLoadError(null);
+    api.get('/inbox/mailboxes', {
+      params: {
+        server,
+        ...(customerId ? { customer_id: customerId } : {}),
+      },
+    }).then(r => {
+      const list = r.data.data || [];
+      setMailboxes(list);
+      setCustomers(r.data.customers || []);
+      const preferAdmin = server === 'campaign' ? 'admin-campaign' : 'admin-app';
+      const stillValid = list.find(m => String(m.id) === String(mailboxId));
+      if (!stillValid) {
+        const admin = list.find(m => m.id === preferAdmin);
+        const first = admin || list[0];
+        setMailboxId(first ? String(first.id) : preferAdmin);
+      }
+    }).catch(e => setLoadError(e.response?.data?.error || e.message));
+  }, [server, customerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset folder when mailbox changes
+  useEffect(() => {
+    if (!mailboxId) return;
+    setActiveFolder('INBOX');
+    setPage(1);
+    setSelectedMsg(null);
+    setMsgDetail(null);
+    api.get('/inbox/folders', { params: mbParams() }).then(r => {
       setFolders(r.data.data || []);
-    }).catch(() => {});
+    }).catch(() => setFolders([]));
+    api.get('/inbox/count', { params: mbParams() })
+      .then(r => setUnread(r.data.unread || 0))
+      .catch(() => setUnread(0));
+  }, [mailboxId, server]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Unread count
-    api.get('/inbox/count').then(r => setUnread(r.data.unread || 0)).catch(() => {});
-  }, []);
-
-  // Load messages when folder/page/search changes
   const loadMessages = useCallback(async () => {
+    if (!mailboxId) return;
     setLoading(true);
     setSelectedMsg(null);
     setMsgDetail(null);
+    setLoadError(null);
     try {
       const r = await api.get('/inbox/messages', {
-        params: { folder: activeFolder, page, limit: 30, search: search || undefined }
+        params: { ...mbParams(), folder: activeFolder, page, limit: 30, search: search || undefined }
       });
       setMessages(r.data.data || []);
       setPagination({ total: r.data.total, pages: r.data.pages });
     } catch (e) {
-      console.error(e);
+      setLoadError(e.response?.data?.error || e.message);
+      setMessages([]);
     } finally {
       setLoading(false);
     }
-  }, [activeFolder, page, search]);
+  }, [activeFolder, page, search, mbParams, mailboxId]);
 
   useEffect(() => { loadMessages(); }, [loadMessages]);
 
-  // Load message detail
   const loadDetail = async (msg) => {
     setSelectedMsg(msg.uid);
     setDetailLoading(true);
     try {
-      const r = await api.get(`/inbox/message/${msg.uid}`, { params: { folder: activeFolder } });
+      const r = await api.get(`/inbox/message/${msg.uid}`, { params: { ...mbParams(), folder: activeFolder } });
       setMsgDetail(r.data.data);
-      // Mark as read in local list
       setMessages(prev => prev.map(m => m.uid === msg.uid ? { ...m, seen: true } : m));
     } catch (e) {
       console.error(e);
@@ -204,7 +233,7 @@ export default function InboxPage({ currentUser }) {
   const deleteMsg = async (uid) => {
     if (!window.confirm('Delete this message?')) return;
     try {
-      await api.delete(`/inbox/message/${uid}`, { params: { folder: activeFolder } });
+      await api.delete(`/inbox/message/${uid}`, { params: { ...mbParams(), folder: activeFolder } });
       setMsgDetail(null);
       setSelectedMsg(null);
       loadMessages();
@@ -213,19 +242,63 @@ export default function InboxPage({ currentUser }) {
     }
   };
 
-  const FOLDER_ICONS = { INBOX: Inbox, Sent: Send, Trash: Trash2 };
-
   const commonFolders = ['INBOX', 'Sent', 'Drafts', 'Trash', 'Junk', 'INBOX.Sent', 'INBOX.Trash'];
+  const activeMb = mailboxes.find(m => String(m.id) === String(mailboxId));
+  const filteredMailboxes = customerId
+    ? mailboxes.filter(m => m.kind === 'admin' || String(m.customer_id) === String(customerId))
+    : mailboxes;
+
+  // Group by customer for sidebar list
+  const grouped = {};
+  for (const m of filteredMailboxes) {
+    const key = m.customer_name || 'Infrastructure';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(m);
+  }
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', gap: 0 }}>
 
-      {/* ---- Folder Sidebar ---- */}
+      {/* ---- Mailbox + Folder Sidebar ---- */}
       <div style={{
-        width: 200, flexShrink: 0, borderRight: '1px solid var(--border)',
+        width: 240, flexShrink: 0, borderRight: '1px solid var(--border)',
         background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', overflow: 'hidden'
       }}>
-        <div style={{ padding: '16px 12px 8px' }}>
+        <div style={{ padding: '12px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Client</div>
+          <select
+            className="input"
+            style={{ fontSize: 12, marginBottom: 8 }}
+            value={customerId}
+            onChange={e => setCustomerId(e.target.value)}
+          >
+            <option value="">All clients + admin</option>
+            {customers.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Mailbox · {server === 'campaign' ? 'Campaign' : 'App Mail'}
+          </div>
+          <select
+            className="input"
+            style={{ fontSize: 12 }}
+            value={mailboxId}
+            onChange={e => setMailboxId(e.target.value)}
+          >
+            {Object.entries(grouped).map(([group, items]) => (
+              <optgroup key={group} label={group}>
+                {items.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name} ({m.email})
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ padding: '12px 12px 8px' }}>
           <button
             className="btn btn-primary btn-sm"
             style={{ width: '100%', justifyContent: 'center' }}
@@ -236,7 +309,6 @@ export default function InboxPage({ currentUser }) {
         </div>
 
         <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
-          {/* Main folders */}
           {[
             { name: 'INBOX',       label: 'Inbox',  badge: unread },
             { name: 'INBOX.Sent',  label: 'Sent' },
@@ -265,7 +337,6 @@ export default function InboxPage({ currentUser }) {
             </button>
           ))}
 
-          {/* Other folders from server */}
           {folders.filter(f => !commonFolders.includes(f.fullName)).map(f => (
             <button key={f.fullName}
               onClick={() => { setActiveFolder(f.fullName); setPage(1); }}
@@ -284,7 +355,8 @@ export default function InboxPage({ currentUser }) {
         </div>
 
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
-          {currentUser?.email}
+          {activeMb ? `${activeMb.display_name}` : currentUser?.email}
+          <div style={{ opacity: 0.7, marginTop: 2 }}>{activeMb?.host || ''}</div>
         </div>
       </div>
 
@@ -293,7 +365,6 @@ export default function InboxPage({ currentUser }) {
         width: 300, flexShrink: 0, borderRight: '1px solid var(--border)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden'
       }}>
-        {/* Search */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ position: 'relative' }}>
             <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -312,9 +383,11 @@ export default function InboxPage({ currentUser }) {
               <RefreshCw size={12} className={loading ? 'spin' : ''} />
             </button>
           </div>
+          {loadError && (
+            <div style={{ marginTop: 6, fontSize: 11, color: '#f87171' }}>{loadError}</div>
+          )}
         </div>
 
-        {/* List */}
         <div style={{ flex: 1, overflow: 'auto' }}>
           {loading ? (
             <div className="loading-state"><RefreshCw size={18} className="spin" /></div>
@@ -332,7 +405,6 @@ export default function InboxPage({ currentUser }) {
           )}
         </div>
 
-        {/* Pagination */}
         {pagination.pages > 1 && (
           <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>←</button>
@@ -346,14 +418,16 @@ export default function InboxPage({ currentUser }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         {!msgDetail && !detailLoading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', flexDirection: 'column', gap: 12 }}>
-            <Mail size={40} style={{ opacity: 0.3 }} />
+            <Inbox size={40} style={{ opacity: 0.3 }} />
             <div style={{ fontSize: 14 }}>Select a message to read</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              {activeMb ? `${activeMb.customer_name} · ${activeMb.email}` : 'Choose a client mailbox above'}
+            </div>
           </div>
         ) : detailLoading ? (
           <div className="loading-state"><RefreshCw size={20} className="spin" /></div>
         ) : msgDetail && (
           <>
-            {/* Message header */}
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div style={{ fontSize: 18, fontWeight: 700, flex: 1, marginRight: 16 }}>{msgDetail.subject}</div>
@@ -390,8 +464,6 @@ export default function InboxPage({ currentUser }) {
                 </div>
               )}
             </div>
-
-            {/* Message body */}
             <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
               {msgDetail.html ? (
                 <iframe
@@ -410,12 +482,16 @@ export default function InboxPage({ currentUser }) {
         )}
       </div>
 
-      {/* ---- Compose Modal ---- */}
       {compose && (
         <ComposeModal
           replyTo={replyTo}
+          mailboxId={mailboxId}
+          server={server}
           onClose={() => { setCompose(false); setReplyTo(null); }}
-          onSent={() => { loadMessages(); api.get('/inbox/count').then(r => setUnread(r.data.unread || 0)).catch(() => {}); }}
+          onSent={() => {
+            loadMessages();
+            api.get('/inbox/count', { params: mbParams() }).then(r => setUnread(r.data.unread || 0)).catch(() => {});
+          }}
         />
       )}
     </div>

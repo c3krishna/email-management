@@ -24,6 +24,7 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS mailbox_monitors (
       id            INT AUTO_INCREMENT PRIMARY KEY,
       customer_id   INT NOT NULL,
+      mail_server   ENUM('app','campaign','both') NOT NULL DEFAULT 'app',
       display_name  VARCHAR(255) DEFAULT NULL,
       imap_host     VARCHAR(255) NOT NULL,
       imap_port     INT DEFAULT 993,
@@ -46,6 +47,13 @@ async function ensureSchema() {
   try {
     await p.query(`ALTER TABLE mailbox_monitors ADD COLUMN notify_emails TEXT DEFAULT NULL`);
   } catch (_) { /* column may already exist */ }
+  try {
+    await p.query(`
+      ALTER TABLE mailbox_monitors
+        ADD COLUMN mail_server ENUM('app','campaign','both') NOT NULL DEFAULT 'app'
+        AFTER customer_id
+    `);
+  } catch (_) { /* may already exist */ }
 }
 
 ensureSchema().catch(e => console.warn('[mailbox-monitors] schema:', e.message));
@@ -68,7 +76,7 @@ router.get('/', verifyToken, async (req, res) => {
   try {
     const { customer_id } = req.query;
     const p = getPool();
-    let sql = `SELECT mm.id, mm.customer_id, mm.display_name, mm.imap_host, mm.imap_port,
+    let sql = `SELECT mm.id, mm.customer_id, mm.mail_server, mm.display_name, mm.imap_host, mm.imap_port,
                       mm.imap_user, mm.folder, mm.poll_interval, mm.last_checked,
                       mm.total_scanned, mm.total_threats, mm.notify_emails, mm.active, mm.created_at,
                       c.name AS customer_name
@@ -76,6 +84,10 @@ router.get('/', verifyToken, async (req, res) => {
                JOIN customers c ON c.id = mm.customer_id`;
     const params = [];
     if (customer_id) { sql += ' WHERE mm.customer_id = ?'; params.push(customer_id); }
+    if (req.query.server && req.query.server !== 'all') {
+      sql += (params.length ? ' AND' : ' WHERE') + ` (mm.mail_server = ? OR mm.mail_server = 'both')`;
+      params.push(req.query.server);
+    }
     sql += ' ORDER BY mm.created_at DESC';
     const [rows] = await p.query(sql, params);
     rows.forEach(r => { r.notify_emails = parseEmails(r.notify_emails); });
@@ -87,7 +99,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, requireRole('super_admin','admin'), async (req, res) => {
   const { customer_id, display_name, imap_host, imap_port = 993, imap_user,
           imap_pass, folder = 'INBOX', use_ssl = true, poll_interval = 120,
-          notify_emails } = req.body;
+          notify_emails, mail_server = 'app' } = req.body;
 
   if (!customer_id || !imap_host || !imap_user || !imap_pass) {
     return res.status(400).json({ error: 'customer_id, imap_host, imap_user, imap_pass required' });
@@ -96,13 +108,14 @@ router.post('/', verifyToken, requireRole('super_admin','admin'), async (req, re
   try {
     const p = getPool();
     const emails = parseEmails(notify_emails);
+    const ms = ['app', 'campaign', 'both'].includes(mail_server) ? mail_server : 'app';
     const [r] = await p.query(`
       INSERT INTO mailbox_monitors
-        (customer_id, display_name, imap_host, imap_port, imap_user, imap_pass,
+        (customer_id, mail_server, display_name, imap_host, imap_port, imap_user, imap_pass,
          folder, use_ssl, poll_interval, notify_emails)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `, [
-      customer_id, display_name || imap_user, imap_host, imap_port, imap_user, imap_pass,
+      customer_id, ms, display_name || imap_user, imap_host, imap_port, imap_user, imap_pass,
       folder, use_ssl ? 1 : 0, poll_interval, JSON.stringify(emails),
     ]);
     res.json({

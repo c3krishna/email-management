@@ -1,12 +1,16 @@
 // ============================================================
 // VIP Contacts + Anomaly/Impersonation Alerts API
-// /var/www/email-management/backend/routes/vip-protection.js
 // ============================================================
 
 const express = require('express');
 const router  = express.Router();
 const mysql   = require('mysql2/promise');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const {
+  ensureVipTables,
+  detectVipImpersonation,
+  detectSenderAnomaly,
+} = require('../vipDetect');
 
 let pool = null;
 function getPool() {
@@ -18,10 +22,13 @@ function getPool() {
   return pool;
 }
 
+ensureVipTables(getPool()).catch(e => console.warn('[vip] schema:', e.message));
+
 router.get('/vip-contacts', verifyToken, async (req, res) => {
   try {
     const { customer_id } = req.query;
     const p = getPool();
+    await ensureVipTables(p);
     const [rows] = await p.query(
       'SELECT * FROM vip_contacts WHERE customer_id=? ORDER BY display_name', [customer_id]
     );
@@ -35,6 +42,7 @@ router.post('/vip-contacts', verifyToken, requireRole('super_admin', 'admin'), a
     if (!customer_id || !display_name || !real_email) {
       return res.status(400).json({ error: 'customer_id, display_name, real_email required' });
     }
+    await ensureVipTables(getPool());
     const [r] = await getPool().query(
       'INSERT INTO vip_contacts (customer_id, display_name, real_email, title) VALUES (?,?,?,?)',
       [customer_id, display_name, real_email, title || null]
@@ -54,6 +62,7 @@ router.get('/impersonation-alerts', verifyToken, async (req, res) => {
   try {
     const { customer_id, hours = 168, limit = 100 } = req.query;
     const p = getPool();
+    await ensureVipTables(p);
     const [rows] = await p.query(`
       SELECT * FROM impersonation_alerts
       WHERE customer_id=? AND detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
@@ -67,6 +76,7 @@ router.get('/anomaly-alerts', verifyToken, async (req, res) => {
   try {
     const { customer_id, hours = 168, limit = 100 } = req.query;
     const p = getPool();
+    await ensureVipTables(p);
     const [rows] = await p.query(`
       SELECT * FROM sender_anomaly_alerts
       WHERE customer_id=? AND detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
@@ -80,6 +90,7 @@ router.get('/protection-summary', verifyToken, async (req, res) => {
   try {
     const { customer_id, hours = 168 } = req.query;
     const p = getPool();
+    await ensureVipTables(p);
 
     const [[vipCount]] = await p.query(
       'SELECT COUNT(*) AS total FROM vip_contacts WHERE customer_id=? AND active=1', [customer_id]
@@ -104,6 +115,46 @@ router.get('/protection-summary', verifyToken, async (req, res) => {
       }
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * POST /api/protection/detect
+ * Body: { customer_id?, mail_from, mail_to?, subject?, display_name?, mail_server? }
+ * Auth: JWT (via parent middleware) OR X-Agent-Secret
+ */
+router.post('/detect', async (req, res) => {
+  const agentSecret = req.headers['x-agent-secret'];
+  const expected = process.env.AGENT_SECRET;
+  const isAgent = expected && agentSecret === expected;
+  if (!isAgent && !req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const {
+      customer_id, mail_from, mail_to, subject, display_name, mail_server = 'app',
+    } = req.body || {};
+    if (!mail_from) return res.status(400).json({ error: 'mail_from required' });
+
+    const p = getPool();
+    const vip = await detectVipImpersonation(p, {
+      customer_id: customer_id || null,
+      mail_from, mail_to, subject, display_name, mail_server,
+    });
+    let anomaly = { alerts: [] };
+    if (customer_id) {
+      anomaly = await detectSenderAnomaly(p, {
+        customer_id, mail_from, mail_to, subject, mail_server,
+      });
+    }
+    res.json({
+      success: true,
+      impersonation: vip.alerts,
+      anomalies: anomaly.alerts,
+      matched: vip.alerts.length > 0 || anomaly.alerts.length > 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.patch('/impersonation-alerts/:id/review', verifyToken, requireRole('super_admin', 'admin'), async (req, res) => {

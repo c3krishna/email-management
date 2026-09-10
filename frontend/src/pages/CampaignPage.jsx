@@ -100,7 +100,7 @@ const TAB_LABELS = {
   dsn:      'DSN Codes',
 };
 
-export default function CampaignPage({ server, range }) {
+export default function CampaignPage({ server, range, selectedDate, dateFrom, dateTo }) {
   const [tab, setTab]         = useState('date');
   const [loading, setLoading] = useState(true);
 
@@ -119,34 +119,36 @@ export default function CampaignPage({ server, range }) {
   // Date range filter for campaign detail
   const [detailRange, setDetailRange] = useState('7d');
 
-  const r = range === '30d' ? '30d' : '7d';
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const p = { range, server };
+      if (range === 'today') p.date = selectedDate;
+      if (range === 'custom') { p.from = dateFrom; p.to = dateTo; }
+
       const [t, c, f, s, d] = await Promise.all([
-        statsApi.getTrend({ range: r, server }),
-        statsApi.getByCampaign({ range: r, server, limit: 30 }),
-        statsApi.getFailureReasons({ range: r, server }),
-        statsApi.getBySender({ range: r, server }),
-        statsApi.getDsnBreakdown({ range: r, server }),
+        statsApi.getTrend(p),
+        statsApi.getByCampaign({ ...p, limit: 30 }),
+        statsApi.getFailureReasons(p),
+        statsApi.getBySender(p),
+        statsApi.getDsnBreakdown(p),
       ]);
-      setTrend((t.data || []).map(r => ({
-        ...r,
-        success:     Number(r.success     || 0),
-        failed:      Number(r.failed      || 0),
-        bounced:     Number(r.bounced     || 0),
-        deferred:    Number(r.deferred    || 0),
-        spam_blocked:Number(r.spam_blocked|| 0),
-        total:       Number(r.total       || 0),
+      setTrend((t.data || []).map(row => ({
+        ...row,
+        success:     Number(row.success     || 0),
+        failed:      Number(row.failed      || 0),
+        bounced:     Number(row.bounced     || 0),
+        deferred:    Number(row.deferred    || 0),
+        spam_blocked:Number(row.spam_blocked|| 0),
+        total:       Number(row.total       || 0),
       })));
-      setCampaigns(c.data);
-      setReasons(f.data);
-      setSenders(s.data);
-      setDsnData(d.data);
+      setCampaigns(c.data || []);
+      setReasons(f.data || []);
+      setSenders(s.data || []);
+      setDsnData(d.data || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [server, range]);
+  }, [server, range, selectedDate, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -190,7 +192,7 @@ export default function CampaignPage({ server, range }) {
         <div>
           <div className="section-title">Campaign Analytics</div>
           <div className="section-sub">
-            {serverLabel} · {r === '30d' ? '30' : '7'} day view
+            {serverLabel} · {range === 'today' ? 'Today' : range === '30d' ? '30-day' : range === 'custom' ? 'Custom' : '7-day'} view
             · {campaigns.length} campaigns · {totals.total.toLocaleString()} total mails
           </div>
         </div>

@@ -41,7 +41,9 @@ export default function App() {
   const [page, setPage]     = useState('dashboard');
   const [server, setServer] = useState('app');
   const [range, setRange]   = useState('today');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(
+    () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  );
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [alertCount, setAlertCount] = useState(0);
@@ -162,7 +164,7 @@ export default function App() {
           {page === 'ip-reputation'   && <IpReputationPage  server={server} />}
           {page === 'email-logs'        && <EmailLogsPage       server={server} />}
           {page === 'delivery-status'  && <DeliveryStatusPage  server={server} />}
-          {page === 'inbox'       && <InboxPage        currentUser={user} />}
+          {page === 'inbox'       && <InboxPage        currentUser={user} server={server} />}
           {page === 'alerts'      && <AlertsPage       {...pageProps} setAlertCount={setAlertCount} />}
           {page === 'firewall' && <FirewallPage server={server}/>}
           {page === 'spamguard'   && <SpamGuardPage    {...pageProps} />}

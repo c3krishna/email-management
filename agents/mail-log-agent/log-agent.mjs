@@ -16,12 +16,17 @@ import http from 'http';
 
 const execAsync = promisify(exec);
 
+// REQUIRED: AGENT_SERVER=app on mail.worktual.tech | AGENT_SERVER=campaign on mail.worktual.pl
+if (!process.env.AGENT_SERVER || !['app', 'campaign'].includes(process.env.AGENT_SERVER)) {
+  console.error('FATAL: set AGENT_SERVER=app|campaign (matches this mail host)');
+  process.exit(1);
+}
+
 // ---- CONFIG (edit these) ----
 const CONFIG = {
-  // Which server is this agent running on
-  server:         process.env.AGENT_SERVER     || 'campaign',   // 'app' or 'campaign'
-  serverName:     process.env.AGENT_SERVER_NAME || 'mail.worktual.pl',
-  vip:            process.env.AGENT_VIP        || '82.113.72.80',
+  server:         process.env.AGENT_SERVER,
+  serverName:     process.env.AGENT_SERVER_NAME || (process.env.AGENT_SERVER === 'app' ? 'mail.worktual.tech' : 'mail.worktual.pl'),
+  vip:            process.env.AGENT_VIP        || (process.env.AGENT_SERVER === 'app' ? '82.113.72.84' : '82.113.72.80'),
 
   // Dashboard endpoint
   dashboardUrl:   process.env.DASHBOARD_URL    || 'https://email-management.worktual.tech',
@@ -46,7 +51,7 @@ const CONFIG = {
   flushTimeout:   parseInt(process.env.FLUSH_TIMEOUT) || 5000,
 
   // Domain to classify inbound/outbound
-  ownDomain:      process.env.OWN_DOMAIN       || 'worktual.pl',
+  ownDomain:      process.env.OWN_DOMAIN       || (process.env.AGENT_SERVER === 'app' ? 'worktual.tech' : 'worktual.pl'),
 };
 
 // ---- STATE ----

@@ -206,17 +206,17 @@ def resolve_notify_emails(monitor):
 def send_alert_emails(recipients, monitor, mail_from, mail_to, subject, result):
     if not recipients or not SMTP_PASS:
         if recipients and not SMTP_PASS:
-            log.warning("SMTP_PASS not set — cannot send alert emails")
+            log.warning("SMTP_PASS not set - cannot send alert emails")
         return 0
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;
                 background:#f9fafb;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb">
       <div style="background:#dc2626;padding:20px 24px">
         <h2 style="margin:0;color:#fff;font-size:18px">
-          🚨 {(result.get('threat_type') or 'THREAT').upper()} detected in mailbox
+          ?? {(result.get('threat_type') or 'THREAT').upper()} detected in mailbox
         </h2>
         <p style="margin:4px 0 0;color:rgba(255,255,255,0.85);font-size:12px">
-          Mailbox: {monitor.get('imap_user')} · Confidence: {result.get('confidence')}%
+          Mailbox: {monitor.get('imap_user')} - Confidence: {result.get('confidence')}%
         </p>
       </div>
       <div style="padding:20px 24px;font-size:13px">
@@ -234,7 +234,7 @@ def send_alert_emails(recipients, monitor, mail_from, mail_to, subject, result):
     for to in recipients:
         try:
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"[Security Alert] {result.get('threat_type')} · {subject[:60]}"
+            msg["Subject"] = f"[Security Alert] {result.get('threat_type')} - {subject[:60]}"
             msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_USER))
             msg["To"] = to
             msg.attach(MIMEText(html, "html"))
@@ -247,6 +247,33 @@ def send_alert_emails(recipients, monitor, mail_from, mail_to, subject, result):
         except Exception as e:
             log.error("Failed to notify %s: %s", to, e)
     return sent
+
+
+def vip_detect(monitor, mail_from, mail_to, subject):
+    """Notify dashboard VIP protection when From looks like a VIP spoof."""
+    try:
+        import urllib.request
+        payload = json.dumps({
+            "customer_id": monitor.get("customer_id"),
+            "mail_from": mail_from,
+            "mail_to": mail_to,
+            "subject": subject,
+            "mail_server": monitor.get("mail_server") or "app",
+        }).encode()
+        req = urllib.request.Request(
+            f"{DASHBOARD_URL}/api/protection/detect",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Agent-Secret": os.getenv("AGENT_SECRET", "WorktualAgent@2026"),
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode() or "{}")
+    except Exception as e:
+        log.debug("vip_detect: %s", e)
+        return None
 
 
 def process_email(monitor, mail_from, mail_to, subject, body):
@@ -265,6 +292,15 @@ def process_email(monitor, mail_from, mail_to, subject, body):
         final_conf = ai_result["confidence"]
         method = "ai" if method == "clean" else method + "+ai"
         reason = ai_result.get("reason") or reason
+
+    # Always run VIP impersonation check (writes alerts when matched)
+    vip_hit = vip_detect(monitor, mail_from, mail_to, subject)
+    if vip_hit and vip_hit.get("matched"):
+        if final_conf < 80:
+            final_type = "vip_impersonation"
+            final_conf = max(final_conf, 85)
+            method = method + "+vip" if method != "clean" else "vip"
+            reason = "VIP display-name impersonation"
 
     is_threat = final_conf >= NOTIFY_MIN_CONF
     result = {
@@ -369,7 +405,7 @@ def poll_mailbox(monitor):
                 if result and result["is_threat"]:
                     threats += 1
                     log.info(
-                        "THREAT [%s%%] %s: %s — %s",
+                        "THREAT [%s%%] %s: %s - %s",
                         result["confidence"], result["threat_type"], mail_from, subject[:50],
                     )
                 uid_str = uid.decode() if isinstance(uid, bytes) else str(uid)

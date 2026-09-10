@@ -98,6 +98,11 @@ app.get('/api/spam/whitelist/for-agent', (req, res, next) => {
   req.url = '/whitelist/for-agent';
   spamRoutes.handle(req, res, next);
 });
+// VIP detect for agents (X-Agent-Secret) — before JWT-only /api/protection mount
+app.post('/api/protection/detect', (req, res, next) => {
+  req.url = '/detect';
+  vipProtectionRoutes.handle(req, res, next);
+});
 
 // ---- Protected routes (JWT required) ----
 app.use('/api/stats',  verifyToken, statsRoutes);

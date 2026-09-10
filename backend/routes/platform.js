@@ -89,6 +89,160 @@ router.get('/mail-servers', verifyToken, async (req, res) => {
   res.json({ success: true, data: Object.values(MAIL_SERVERS) });
 });
 
+// GET /api/platform/infra-health — live dual-infra ops snapshot
+router.get('/infra-health', verifyToken, async (req, res) => {
+  try {
+    const { getPool } = require('../db');
+    const { istToday } = require('../mailServers');
+    const today = istToday();
+    const platform = getPlatformPool();
+
+    async function healthFor(serverKey) {
+      const pool = getPool(serverKey);
+      const meta = MAIL_SERVERS[serverKey];
+      const out = {
+        key: serverKey,
+        label: meta.label,
+        domain: meta.domain,
+        vip: meta.vip,
+        active_ip: meta.active_ip,
+        agent_online: false,
+        queue_count: 0,
+        deferred_count: 0,
+        last_realtime: null,
+        realtime_today: 0,
+        delivery_today: 0,
+        delivery_success: 0,
+        delivery_failed: 0,
+        delivery_bounced: 0,
+        delivery_7d: 0,
+        spam_24h: 0,
+        quarantine_open: 0,
+        error: null,
+      };
+
+      try {
+        const [[q]] = await pool.query(`
+          SELECT snapshot_at, queue_count, deferred_count, active_count
+          FROM postfix_queue_snapshot ORDER BY id DESC LIMIT 1
+        `).catch(() => [[null]]);
+        if (q) {
+          out.queue_count = Number(q.queue_count || 0);
+          out.deferred_count = Number(q.deferred_count || 0);
+          out.agent_online = q.snapshot_at
+            ? (Date.now() - new Date(String(q.snapshot_at).replace(' ', 'T') + '+05:30').getTime() < 180000)
+            : false;
+        }
+      } catch (e) { out.error = e.message; }
+
+      try {
+        const [[rt]] = await pool.query(`
+          SELECT MAX(log_datetime) AS last_event, COUNT(*) AS total_today
+          FROM email_log_realtime WHERE DATE(log_datetime) = ?
+        `, [today]).catch(() => [[{}]]);
+        out.last_realtime = rt?.last_event || null;
+        out.realtime_today = Number(rt?.total_today || 0);
+        if (!out.agent_online && rt?.last_event) {
+          out.agent_online = Date.now() - new Date(rt.last_event).getTime() < 300000;
+        }
+      } catch { /* ok */ }
+
+      try {
+        const [[d]] = await pool.query(`
+          SELECT COUNT(*) AS total,
+            SUM(CASE WHEN status IN ('sent','delivered') OR delivery_status IN ('sent','delivered') THEN 1 ELSE 0 END) AS success,
+            SUM(CASE WHEN status = 'failed' OR delivery_status = 'failed' THEN 1 ELSE 0 END) AS failed,
+            SUM(CASE WHEN status = 'bounced' OR delivery_status = 'bounced' OR dsn LIKE '5%' THEN 1 ELSE 0 END) AS bounced
+          FROM email_delivery_details WHERE log_date = ?
+        `, [today]);
+        out.delivery_today = Number(d?.total || 0);
+        out.delivery_success = Number(d?.success || 0);
+        out.delivery_failed = Number(d?.failed || 0);
+        out.delivery_bounced = Number(d?.bounced || 0);
+
+        // Fallback to realtime if delivery empty
+        if (out.delivery_today === 0 && out.realtime_today > 0) {
+          out.delivery_today = out.realtime_today;
+          out.data_source = 'email_log_realtime';
+        } else {
+          out.data_source = 'email_delivery_details';
+        }
+
+        const [[w]] = await pool.query(`
+          SELECT COUNT(*) AS total FROM email_delivery_details
+          WHERE log_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        `);
+        out.delivery_7d = Number(w?.total || 0);
+      } catch { /* ok */ }
+
+      try {
+        const [[q]] = await pool.query(`
+          SELECT COUNT(*) AS total FROM email_quarantine
+          WHERE status IN ('held','quarantined','pending') OR status IS NULL
+        `).catch(() => [[{ total: 0 }]]);
+        out.quarantine_open = Number(q?.total || 0);
+      } catch { /* ok */ }
+
+      return out;
+    }
+
+    const [app, campaign] = await Promise.all([healthFor('app'), healthFor('campaign')]);
+
+    // Spam 24h from threat_platform if available
+    try {
+      const [spamRows] = await platform.query(`
+        SELECT server, COUNT(*) AS total FROM spam_detections
+        WHERE detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        GROUP BY server
+      `).catch(() => [[]]);
+      for (const r of spamRows || []) {
+        if (r.server === 'app') app.spam_24h = Number(r.total || 0);
+        if (r.server === 'campaign') campaign.spam_24h = Number(r.total || 0);
+      }
+    } catch { /* ok */ }
+
+    let customers = { total: 0, app: 0, campaign: 0, both: 0 };
+    try {
+      await ensureCustomerMailServerColumn(platform);
+      const [crows] = await platform.query(`
+        SELECT mail_server, COUNT(*) AS n FROM customers WHERE active = 1 GROUP BY mail_server
+      `);
+      for (const r of crows) {
+        customers.total += Number(r.n || 0);
+        if (r.mail_server === 'app') customers.app = Number(r.n || 0);
+        else if (r.mail_server === 'campaign') customers.campaign = Number(r.n || 0);
+        else customers.both = Number(r.n || 0);
+      }
+    } catch { /* ok */ }
+
+    // Bindings table (optional)
+    let bindings = [];
+    try {
+      const [brows] = await platform.query(`
+        SELECT msb.*, c.name AS customer_name
+        FROM mail_server_bindings msb
+        LEFT JOIN customers c ON c.id = msb.customer_id
+        WHERE msb.active = 1
+        ORDER BY msb.mail_server, c.name
+      `);
+      bindings = brows;
+    } catch { /* table may not exist */ }
+
+    res.json({
+      success: true,
+      data: {
+        as_of: new Date().toISOString(),
+        today,
+        servers: { app, campaign },
+        customers,
+        bindings,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/platform/customers
 router.get('/customers', verifyToken, requireRole('super_admin'), async (req, res) => {
   try {

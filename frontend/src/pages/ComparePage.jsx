@@ -28,7 +28,7 @@ function Stat({ label, value, color, sub }) {
   );
 }
 
-export default function ComparePage({ range, selectedDate, dateFrom, dateTo }) {
+export default function ComparePage({ range, selectedDate, dateFrom, dateTo, server = 'campaign' }) {
   const [campaigns,  setCampaigns]  = useState([]);
   const [summary,    setSummary]    = useState([]);
   const [missing,    setMissing]    = useState([]);
@@ -41,25 +41,25 @@ export default function ComparePage({ range, selectedDate, dateFrom, dateTo }) {
   const [missingTotal,  setMissingTotal]  = useState(0);
 
   const buildParams = useCallback((extra = {}) => {
-    const p = { range, ...extra };
+    const p = { range, server: server || 'campaign', ...extra };
     if (range === 'today') p.date = selectedDate;
     if (range === 'custom') { p.from = dateFrom; p.to = dateTo; }
     if (selectedCampaign) p.campaign_id = selectedCampaign;
     return p;
-  }, [range, selectedDate, dateFrom, dateTo, selectedCampaign]);
+  }, [range, selectedDate, dateFrom, dateTo, selectedCampaign, server]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [c, s] = await Promise.all([
-        api.get('/compare/campaigns', { params: { range: range === '30d' ? '30d' : '7d' } }),
+        api.get('/compare/campaigns', { params: { range, server: server || 'campaign', ...(range === 'today' ? { date: selectedDate } : {}), ...(range === 'custom' ? { from: dateFrom, to: dateTo } : {}) } }),
         api.get('/compare/summary',   { params: buildParams() }),
       ]);
       setCampaigns(c.data.data);
       setSummary(s.data.data);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [buildParams, range]);
+  }, [buildParams, range, server, selectedDate, dateFrom, dateTo]);
 
   const loadMissing = useCallback(async (pg = 1) => {
     try {

@@ -81,20 +81,23 @@ export default function PlatformOverviewPage({ server = 'app' }) {
   const [globalStats, setGlobalStats] = useState(null);
   const [infra, setInfra] = useState([]);
   const [spamByServer, setSpamByServer] = useState([]);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedPlatform, setExpandedPlatform] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [r, m, s] = await Promise.all([
+      const [r, m, s, h] = await Promise.all([
         api.get('/connectors/summary', { params:{ hours:720 } }).catch(()=>({data:{data:null}})),
         api.get('/platform/mail-servers').catch(()=>({data:{data:[]}})),
         api.get('/spam/summary', { params:{ hours:24, server: 'all' } }).catch(()=>({data:{data:null}})),
+        api.get('/platform/infra-health').catch(()=>({data:{data:null}})),
       ]);
       setGlobalStats(r.data.data);
       setInfra(m.data.data || []);
       setSpamByServer(s.data?.data?.byServer || []);
+      setHealth(h.data?.data || null);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -103,6 +106,13 @@ export default function PlatformOverviewPage({ server = 'app' }) {
 
   const stats = globalStats?.stats || {};
   const activeInfra = server === 'campaign' ? 'campaign' : 'app';
+  const healthServers = health?.servers || {};
+  const cust = health?.customers || {};
+
+  const liveCards = [
+    healthServers.app,
+    healthServers.campaign,
+  ].filter(Boolean);
 
   return (
     <div style={{
@@ -117,7 +127,8 @@ export default function PlatformOverviewPage({ server = 'app' }) {
           background:C.tealDim, border:`1px solid ${C.teal}55`,
           borderRadius:20, padding:'5px 16px', fontSize:11, fontWeight:700,
           letterSpacing:1.2, color:C.teal, textTransform:'uppercase', marginBottom:14 }}>
-          Dual mail infra — App (CCaaS) + Campaign (bulk) · Topbar: {activeInfra}
+          Dual mail infra — live ops · Topbar: {activeInfra}
+          {loading ? ' · loading…' : ''}
         </div>
         <h1 style={{ fontSize:28, fontWeight:900,
           background:`linear-gradient(135deg,var(--text-primary),${C.teal})`,
@@ -128,41 +139,60 @@ export default function PlatformOverviewPage({ server = 'app' }) {
           App mail (mail.worktual.tech) for notifications / CCaaS / client-From via Worktual.
           Campaign (mail.worktual.pl) for bulk with delivery reporting. Separate policies per infra.
         </p>
+        <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }} onClick={load} disabled={loading}>
+          Refresh live health
+        </button>
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:28 }}>
-        {(infra.length ? infra : [
+        {(liveCards.length ? liveCards : (infra.length ? infra : [
           { key:'app', label:'App Mail', domain:'mail.worktual.tech', role:'CCaaS / notifications', vip:'82.113.72.84', active_ip:'10.180.0.84' },
           { key:'campaign', label:'Campaign Bulk', domain:'mail.worktual.pl', role:'Bulk campaign sending', vip:'82.113.72.80', active_ip:'10.180.0.89' },
-        ]).map(m => {
-          const spamCount = spamByServer.find(x => x.server === m.key)?.total || 0;
-          const selected = activeInfra === m.key;
+        ])).map(m => {
+          const key = m.key;
+          const spamCount = spamByServer.find(x => x.server === key)?.total || m.spam_24h || 0;
+          const selected = activeInfra === key;
+          const online = m.agent_online;
           return (
-            <div key={m.key} style={{
+            <div key={key} style={{
               background: selected ? C.tealDim : C.card,
               border: `1px solid ${selected ? C.teal : C.border}`,
               borderRadius: 12, padding: 16,
             }}>
-              <div style={{ fontSize:14, fontWeight:800, marginBottom:6 }}>{m.label}</div>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                <div style={{ fontSize:14, fontWeight:800 }}>{m.label}</div>
+                <span style={{
+                  fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:12,
+                  background: online ? 'rgba(22,163,74,0.2)' : 'rgba(220,38,38,0.15)',
+                  color: online ? '#4ade80' : '#f87171',
+                }}>
+                  {online === undefined ? '—' : online ? 'Agent online' : 'Agent offline'}
+                </span>
+              </div>
               <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{m.role || m.domain}</div>
               <div style={{ fontSize:11, fontFamily:'monospace', lineHeight:1.8, color:C.white }}>
                 Domain: {m.domain}<br/>
                 VIP: {m.vip} · Node: {m.active_ip}<br/>
-                Spam (24h): {spamCount}
+                Today: {m.delivery_today ?? '—'} · Success: {m.delivery_success ?? '—'} ·
+                Failed: {m.delivery_failed ?? '—'} · Bounced: {m.delivery_bounced ?? '—'}<br/>
+                7d volume: {m.delivery_7d ?? '—'} · Queue: {m.queue_count ?? '—'} ·
+                Realtime today: {m.realtime_today ?? '—'}<br/>
+                Spam (24h): {spamCount} · Quarantine: {m.quarantine_open ?? '—'}
+                {m.data_source === 'email_log_realtime' ? ' · live-log fallback' : ''}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Global stats strip */}
+      {/* Global stats strip — live where possible */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:10, marginBottom:32 }}>
         {[
-          { label:'Platforms Supported', value:PLATFORMS.length,               color:C.teal,   icon:'🔌' },
+          { label:'Live Postfix hosts', value: 2, color:C.teal,   icon:'🔌' },
           { label:'Attack Types Covered',value:ATTACK_TYPES.filter(a=>a.coverage==='full').length, color:C.green,  icon:'🛡️' },
-          { label:'Customers Protected', value:stats.active_customers || '—',  color:C.blue,   icon:'👥' },
-          { label:'Total Events (30d)',  value:stats.total_events || '—',      color:C.purple, icon:'📊' },
-          { label:'Threats Blocked',     value:stats.blocked || '—',           color:C.red,    icon:'🚫' },
+          { label:'Customers Protected', value: cust.total || stats.active_customers || '—',  color:C.blue,   icon:'👥' },
+          { label:'App today',  value: healthServers.app?.delivery_today ?? '—',      color:C.purple, icon:'📊' },
+          { label:'Campaign today', value: healthServers.campaign?.delivery_today ?? '—', color:C.red,    icon:'🚫' },
           { label:'AI Model',            value:'llama3.1:8b',                  color:C.amber,  icon:'🤖', isText:true },
         ].map((k,i)=>(
           <div key={i} style={{ background:C.card, borderRadius:12, padding:'14px 16px',
@@ -202,16 +232,19 @@ export default function PlatformOverviewPage({ server = 'app' }) {
       {/* ── Supported platforms grid ── */}
       <div style={{ fontSize:11, fontWeight:800, letterSpacing:1.5, textTransform:'uppercase',
         color:C.teal, marginBottom:16, display:'flex', alignItems:'center', gap:10 }}>
-        Supported mail platforms — click any card for setup details
+        Supported mail platforms — Postfix live; others are capability docs until connectors are wired
         <div style={{ flex:1, height:1, background:`linear-gradient(90deg,${C.border},transparent)` }}/>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:36 }}>
-        {PLATFORMS.map((p,i)=>(
+        {PLATFORMS.map((p,i)=>{
+          const isLive = p.id === 'custom';
+          return (
           <div key={i}
             onClick={()=>setExpandedPlatform(expandedPlatform===p.id?null:p.id)}
             style={{ background:C.card, border:`1px solid ${expandedPlatform===p.id?p.color:C.border}`,
               borderRadius:14, padding:'18px 16px', cursor:'pointer', transition:'all 0.15s',
-              boxShadow: expandedPlatform===p.id ? `0 0 20px ${p.color}33` : 'none' }}>
+              boxShadow: expandedPlatform===p.id ? `0 0 20px ${p.color}33` : 'none',
+              opacity: isLive ? 1 : 0.85 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
               <div style={{ width:38, height:38, borderRadius:10, background:`${p.color}22`,
                 border:`1px solid ${p.color}44`, display:'flex', alignItems:'center',
@@ -222,6 +255,11 @@ export default function PlatformOverviewPage({ server = 'app' }) {
             <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
               <span style={{ fontSize:9, padding:'2px 7px', borderRadius:12,
                 background:`${p.color}15`, color:p.color, fontWeight:700 }}>{p.direction}</span>
+              <span style={{ fontSize:9, padding:'2px 7px', borderRadius:12,
+                background: isLive ? 'rgba(22,163,74,0.2)' : 'rgba(148,163,184,0.2)',
+                color: isLive ? '#4ade80' : '#94a3b8', fontWeight:700 }}>
+                {isLive ? 'Live (App + Campaign)' : 'Capability doc'}
+              </span>
             </div>
 
             {expandedPlatform===p.id && (
@@ -229,10 +267,20 @@ export default function PlatformOverviewPage({ server = 'app' }) {
                 fontSize:11, color:'#c5d8f5', lineHeight:1.7 }}>
                 <div><strong style={{color:p.color}}>Access needed:</strong> {p.access}</div>
                 <div><strong style={{color:p.color}}>Detection speed:</strong> {p.realtime}</div>
+                {!isLive && (
+                  <div style={{ marginTop:6, color:C.muted }}>
+                    Not a live OAuth/API product in this release — documentation only.
+                  </div>
+                )}
+                {isLive && (
+                  <div style={{ marginTop:6, color:C.muted }}>
+                    Maps to mail.worktual.tech (App) and mail.worktual.pl (Campaign) via milter + log agents.
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+        );})}
       </div>
 
       {/* ── Attack coverage matrix ── */}

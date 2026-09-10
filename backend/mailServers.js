@@ -9,6 +9,7 @@ const MAIL_SERVERS = {
     key: 'app',
     label: 'App Mail',
     domain: 'mail.worktual.tech',
+    mail_domains: ['worktual.tech', 'worktual.com'],
     role: 'Application notifications, CCaaS email channel, AI CCaaS, client-domain From via Worktual',
     vip: '82.113.72.84',
     active_ip: '10.180.0.84',
@@ -17,6 +18,7 @@ const MAIL_SERVERS = {
     key: 'campaign',
     label: 'Campaign Bulk',
     domain: 'mail.worktual.pl',
+    mail_domains: ['worktual.pl', 'worktual.tech', 'worktual.com'],
     role: 'Bulk campaign sending with delivery/bounce reporting',
     vip: '82.113.72.80',
     active_ip: '10.180.0.89',
@@ -37,6 +39,83 @@ function serverFilter(column, server, params = []) {
   if (s === 'all') return { sql: '1=1', params };
   params.push(s);
   return { sql: `${column} = ?`, params };
+}
+
+/** Today's date in Asia/Kolkata (IST) as YYYY-MM-DD */
+function istToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/**
+ * Shared date filter for log_date columns.
+ * Supports today | 7d | 30d | custom (+ optional date/from/to).
+ * Uses IST "today" when no explicit date is provided.
+ */
+function buildDateFilter(range, date, from, to, column = 'log_date') {
+  if (range === 'custom' && from && to) {
+    return { dateFilter: `${column} BETWEEN ? AND ?`, params: [from, to] };
+  }
+  if (range === 'today' || (date && range !== '7d' && range !== '30d')) {
+    const d = date || istToday();
+    return { dateFilter: `${column} = ?`, params: [d] };
+  }
+  if (range === '7d') {
+    return { dateFilter: `${column} >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`, params: [] };
+  }
+  if (range === '30d') {
+    return { dateFilter: `${column} >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`, params: [] };
+  }
+  return { dateFilter: `${column} = CURDATE()`, params: [] };
+}
+
+/**
+ * Domains that count as "our" mail for inbound/outbound classification.
+ * App → worktual.tech/com; Campaign → worktual.pl + shared Worktual domains.
+ * Extra domains from env MAIL_DOMAIN / MAIL_DOMAINS_CAMPAIGN or MAIL_SERVERS.
+ */
+function getOwnedDomains(server) {
+  const key = normalizeServer(server, 'app');
+  const base = [...(MAIL_SERVERS[key]?.mail_domains || ['worktual.tech'])];
+  const envExtra = key === 'campaign'
+    ? (process.env.MAIL_DOMAINS_CAMPAIGN || process.env.MAIL_DOMAIN || '')
+    : (process.env.MAIL_DOMAIN || '');
+  for (const d of String(envExtra).split(/[,\s]+/).filter(Boolean)) {
+    if (!base.includes(d)) base.push(d);
+  }
+  // Always include worktual wildcard-friendly roots
+  if (!base.some(d => d.includes('worktual'))) {
+    base.push(key === 'campaign' ? 'worktual.pl' : 'worktual.tech');
+  }
+  return base;
+}
+
+/**
+ * SQL CASE fragments for inbound/outbound matching owned domains.
+ * Matches %@domain and also %@%.domain via LIKE '%@domain%' / '%@%.domain%'.
+ */
+function buildDirectionSql(server) {
+  const domains = getOwnedDomains(server);
+  const fromParts = [];
+  const toParts = [];
+  for (const d of domains) {
+    const esc = d.replace(/'/g, "''");
+    fromParts.push(`mail_from LIKE '%@${esc}' OR mail_from LIKE '%@%.${esc}' OR mail_from LIKE '%@${esc}%'`);
+    toParts.push(`mail_to LIKE '%@${esc}' OR mail_to LIKE '%@%.${esc}' OR mail_to LIKE '%@${esc}%'`);
+  }
+  // Broader worktual catch-all for both infrastructures
+  fromParts.push(`mail_from LIKE '%@worktual%'`);
+  toParts.push(`mail_to LIKE '%@worktual%'`);
+  return {
+    outboundSql: `SUM(CASE WHEN ${fromParts.join(' OR ')} THEN 1 ELSE 0 END)`,
+    inboundSql:  `SUM(CASE WHEN ${toParts.join(' OR ')} THEN 1 ELSE 0 END)`,
+    directionCase: `CASE WHEN ${fromParts.join(' OR ')} THEN 'Outbound' ELSE 'Inbound' END`,
+    domains,
+  };
 }
 
 /**
@@ -125,6 +204,10 @@ module.exports = {
   MAIL_SERVERS,
   normalizeServer,
   serverFilter,
+  istToday,
+  buildDateFilter,
+  getOwnedDomains,
+  buildDirectionSql,
   resolveCustomerMailServer,
   ensureCustomerMailServerColumn,
   ensureSpamWhitelistMailServer,
