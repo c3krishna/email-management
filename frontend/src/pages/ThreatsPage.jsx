@@ -15,7 +15,7 @@ const TT = { background: '#0d1117', border: '1px solid #2d3748', borderRadius: 8
 
 const THREAT_CATS = [
   { key: 'spam',      label: 'Spam',        color: '#f97316', icon: Ban,           desc: 'Bulk/unsolicited mail blocked by RBL/DNSBL' },
-  { key: 'phishing',  label: 'Phishing',    color: '#f43f5e', icon: AlertTriangle, desc: 'Phishing attempts detected' },
+  { key: 'phishing',  label: 'Phishing',    color: '#f43f5e', icon: AlertTriangle, desc: 'Phishing / impersonation (delivery + AI engine)' },
   { key: 'malware',   label: 'Malware',     color: '#a855f7', icon: Bug,           desc: 'Virus/malware detected by Amavis/ClamAV' },
   { key: 'blocked',   label: 'Blocked',     color: '#ef4444', icon: Shield,        desc: 'Rejected by policy/blacklist' },
   { key: 'bounced',   label: 'Bounced',     color: '#ea580c', icon: Mail,          desc: 'Permanent delivery failures (5xx)' },
@@ -92,8 +92,11 @@ export default function ThreatsPage({ server, range, selectedDate }) {
     <div>
       <div className="flex-between mb-24">
         <div>
-          <div className="section-title">Threats</div>
-          <div className="section-sub">{serverLabel} · Spam, phishing, malware and rejection analysis</div>
+          <div className="section-title">Threat Map</div>
+          <div className="section-sub">
+            {serverLabel} · Spam, phishing, malware and rejection analysis
+            {threatData?.engine_enriched ? ' · Includes AI Threat Engine indicators' : ''}
+          </div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={load}><RefreshCw size={13} /> Refresh</button>
       </div>

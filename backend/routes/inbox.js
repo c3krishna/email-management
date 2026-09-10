@@ -26,6 +26,11 @@ function getThreatPool() {
 function getAdminImapConfig(server = 'app') {
   const s = normalizeServer(server, 'app');
   if (s === 'campaign') {
+    // Prefer internal active IP — VIP 82.113.72.80 often refuses IMAP from dashboard host
+    const defaultHost = process.env.MAIL_IMAP_CAMPAIGN_HOST
+      || process.env.MAIL_IMAP_HOST_CAMPAIGN
+      || MAIL_SERVERS.campaign?.active_ip
+      || 'mail.worktual.pl';
     return {
       id: 'admin-campaign',
       kind: 'admin',
@@ -35,19 +40,22 @@ function getAdminImapConfig(server = 'app') {
       customer_name: 'Worktual (Campaign)',
       user:     process.env.MAIL_IMAP_CAMPAIGN_USER || process.env.MAIL_IMAP_USER_CAMPAIGN || 'admin@worktual.pl',
       password: process.env.MAIL_IMAP_CAMPAIGN_PASSWORD || process.env.MAIL_IMAP_PASSWORD_CAMPAIGN || process.env.MAIL_IMAP_PASSWORD,
-      host:     process.env.MAIL_IMAP_CAMPAIGN_HOST || process.env.MAIL_IMAP_HOST_CAMPAIGN || 'mail.worktual.pl',
+      host:     defaultHost,
       port:     parseInt(process.env.MAIL_IMAP_CAMPAIGN_PORT || process.env.MAIL_IMAP_PORT || '993', 10),
       tls:      true,
       tlsOptions: { rejectUnauthorized: false },
       connTimeout: 15000,
       authTimeout: 10000,
-      smtp_host: process.env.MAIL_SMTP_CAMPAIGN_HOST || 'mail.worktual.pl',
+      smtp_host: process.env.MAIL_SMTP_CAMPAIGN_HOST || MAIL_SERVERS.campaign?.active_ip || 'mail.worktual.pl',
       smtp_port: parseInt(process.env.MAIL_SMTP_CAMPAIGN_PORT || '587', 10),
       smtp_user: process.env.MAIL_SMTP_CAMPAIGN_USER || process.env.MAIL_IMAP_CAMPAIGN_USER,
       smtp_pass: process.env.MAIL_SMTP_CAMPAIGN_PASSWORD || process.env.MAIL_IMAP_CAMPAIGN_PASSWORD || process.env.MAIL_IMAP_PASSWORD,
       mail_from: process.env.MAIL_FROM_CAMPAIGN || process.env.MAIL_IMAP_CAMPAIGN_USER || 'admin@worktual.pl',
     };
   }
+  const appHost = process.env.MAIL_IMAP_HOST
+    || MAIL_SERVERS.app?.active_ip
+    || 'mail.worktual.tech';
   return {
     id: 'admin-app',
     kind: 'admin',
@@ -57,13 +65,13 @@ function getAdminImapConfig(server = 'app') {
     customer_name: 'Worktual (App Mail)',
     user:     process.env.MAIL_IMAP_USER     || 'admin@worktual.tech',
     password: process.env.MAIL_IMAP_PASSWORD,
-    host:     process.env.MAIL_IMAP_HOST     || 'mail.worktual.tech',
+    host:     appHost,
     port:     parseInt(process.env.MAIL_IMAP_PORT) || 993,
     tls:      true,
     tlsOptions: { rejectUnauthorized: false },
     connTimeout: 15000,
     authTimeout: 10000,
-    smtp_host: process.env.MAIL_SMTP_HOST || 'mail.worktual.tech',
+    smtp_host: process.env.MAIL_SMTP_HOST || MAIL_SERVERS.app?.active_ip || 'mail.worktual.tech',
     smtp_port: parseInt(process.env.MAIL_SMTP_PORT || '587', 10),
     smtp_user: process.env.MAIL_SMTP_USER || process.env.MAIL_IMAP_USER,
     smtp_pass: process.env.MAIL_SMTP_PASSWORD || process.env.MAIL_IMAP_PASSWORD,

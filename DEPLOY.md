@@ -74,6 +74,16 @@ NOTIFY_FROM=noreply@worktual.tech
 
 Models are already on MiniAI (`miniai.worktual.tech:11434`). Override any tag via env if you pull a newer instruct variant.
 Optional: `MAIL_IMAP_*` / `MAIL_SMTP_*` for Inbox page.
+Campaign Inbox should use the **active MTA IP** (not VIP) so IMAP is reachable from the dashboard host:
+
+```bash
+# backend .env or ecosystem
+MAIL_IMAP_CAMPAIGN_HOST=10.180.0.89
+MAIL_IMAP_CAMPAIGN_USER=admin@worktual.pl
+MAIL_IMAP_CAMPAIGN_PASSWORD=...
+```
+
+(VIP `82.113.72.80:993` often returns `ECONNREFUSED` from the API host.)
 
 ### 2.3 Install & start API
 

@@ -651,7 +651,7 @@ router.get('/threat-breakdown', async (req, res) => {
           SELECT
             CAST(SUM(CASE WHEN status IN ('sent','delivered','ok') THEN 1 ELSE 0 END) AS SIGNED) AS clean,
             CAST(SUM(CASE WHEN COALESCE(reason,'') LIKE '%spam%' OR COALESCE(classification,'') LIKE '%spam%' THEN 1 ELSE 0 END) AS SIGNED) AS spam,
-            CAST(SUM(CASE WHEN COALESCE(reason,'') LIKE '%phish%' THEN 1 ELSE 0 END) AS SIGNED) AS phishing,
+            CAST(SUM(CASE WHEN COALESCE(reason,'') LIKE '%phish%' OR COALESCE(classification,'') LIKE '%phish%' THEN 1 ELSE 0 END) AS SIGNED) AS phishing,
             CAST(SUM(CASE WHEN COALESCE(reason,'') LIKE '%virus%' OR COALESCE(reason,'') LIKE '%malware%' THEN 1 ELSE 0 END) AS SIGNED) AS malware,
             CAST(SUM(CASE WHEN COALESCE(reason,'') LIKE '%reject%' OR COALESCE(reason,'') LIKE '%blocked%' THEN 1 ELSE 0 END) AS SIGNED) AS blocked,
             CAST(SUM(CASE WHEN status = 'bounced' OR COALESCE(dsn,'') LIKE '5%' THEN 1 ELSE 0 END) AS SIGNED) AS bounced,
@@ -664,7 +664,49 @@ router.get('/threat-breakdown', async (req, res) => {
       } catch { /* ignore */ }
     }
 
-    res.json({ success: true, data: rows[0] });
+    const data = { ...(rows[0] || {}) };
+
+    // Enrich phishing/spam/malware from AI engine + milter when delivery reasons lack them
+    // (Threat Map was showing 0 while Threat Intelligence had indicator counts)
+    const deliveryPhish = Number(data.phishing || 0);
+    const deliverySpam = Number(data.spam || 0);
+    const deliveryMalware = Number(data.malware || 0);
+    if (deliveryPhish === 0 || deliverySpam === 0 || deliveryMalware === 0) {
+      try {
+        const plat = getPlatformPool();
+        const hours = range === 'today' ? 24 : range === '30d' ? 720 : 168;
+        const [[eng]] = await plat.query(`
+          SELECT
+            SUM(CASE WHEN threat_type='phishing' OR threat_type='impersonation' THEN 1 ELSE 0 END) AS phishing,
+            SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+            SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+            SUM(CASE WHEN threat_type='url_threat' THEN 1 ELSE 0 END) AS url_threat
+          FROM threat_indicators
+          WHERE status='active'
+        `);
+        const [[sd]] = await plat.query(`
+          SELECT
+            SUM(CASE WHEN spam_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+            SUM(CASE WHEN spam_type='spam' THEN 1 ELSE 0 END) AS spam,
+            SUM(CASE WHEN spam_type='malware' THEN 1 ELSE 0 END) AS malware
+          FROM spam_detections
+          WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        `, [hours]).catch(() => [[{}]]);
+        if (deliveryPhish === 0) {
+          data.phishing = Number(eng?.phishing || 0) + Number(sd?.phishing || 0);
+        }
+        if (deliverySpam === 0) {
+          data.spam = Number(eng?.spam || 0) + Number(sd?.spam || 0);
+        }
+        if (deliveryMalware === 0) {
+          data.malware = Number(eng?.malware || 0) + Number(sd?.malware || 0);
+        }
+        data.engine_enriched = true;
+        data.url_threat = Number(eng?.url_threat || 0);
+      } catch { /* optional */ }
+    }
+
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -681,7 +723,7 @@ router.get('/recent-logs', async (req, res) => {
 
     let [rows] = await pool.query(`
       SELECT
-        id, log_date, log_time, mail_from, mail_to,
+        id, log_date, log_time, mail_from, mail_to, subject,
         campaign_id, status, delivery_status, dsn, reason, duration,
         ${directionCase} AS direction,
         CASE
@@ -712,7 +754,7 @@ router.get('/recent-logs', async (req, res) => {
         const [rtRows] = await pool.query(`
           SELECT
             id, DATE(log_datetime) AS log_date, TIME(log_datetime) AS log_time,
-            mail_from, mail_to, NULL AS campaign_id, status, status AS delivery_status,
+            mail_from, mail_to, subject, NULL AS campaign_id, status, status AS delivery_status,
             dsn, reason, duration_ms AS duration,
             COALESCE(direction,
               CASE WHEN mail_from LIKE '%@worktual%' THEN 'Outbound' ELSE 'Inbound' END

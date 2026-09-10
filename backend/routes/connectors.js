@@ -364,6 +364,19 @@ router.get('/summary', verifyToken, async (req, res) => {
         `);
         threatTrend = spTrend || [];
       }
+      if (!threatTrend.length) {
+        const [engTrend] = await p.query(`
+          SELECT DATE(COALESCE(last_seen_at, created_at)) AS date,
+            SUM(CASE WHEN threat_type IN ('phishing','impersonation') THEN 1 ELSE 0 END) AS phishing,
+            SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+            SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+            SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec
+          FROM threat_indicators
+          WHERE COALESCE(last_seen_at, created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+          GROUP BY DATE(COALESCE(last_seen_at, created_at)) ORDER BY date ASC
+        `);
+        threatTrend = engTrend || [];
+      }
     } catch { /* ignore */ }
 
     // When connector events are empty, surface engine + spam counts in KPIs
@@ -371,6 +384,13 @@ router.get('/summary', verifyToken, async (req, res) => {
     if (Number(stats.total_events || 0) === 0) {
       mergedStats.total_events = Number(engine.active || engine.total || 0) + Number(spamDetections.total || 0);
       mergedStats.phishing = Number(engine.phishing || 0) + Number(spamDetections.phishing || 0);
+      // Include impersonation under phishing for KPI consistency with Threat Map
+      try {
+        const [[imp]] = await p.query(
+          `SELECT COUNT(*) AS c FROM threat_indicators WHERE status='active' AND threat_type='impersonation'`
+        );
+        mergedStats.phishing = Number(mergedStats.phishing || 0) + Number(imp?.c || 0);
+      } catch { /* ignore */ }
       mergedStats.spam = Number(engine.spam || 0) + Number(spamDetections.spam || 0);
       mergedStats.malware = Number(engine.malware || 0) + Number(spamDetections.malware || 0);
       mergedStats.bec = Number(engine.bec || 0) + Number(spamDetections.bec || 0);

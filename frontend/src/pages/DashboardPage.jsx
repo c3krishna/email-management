@@ -567,9 +567,14 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
                       {log.mail_to || '—'}
                     </div>
                   </td>
-                  <td style={{ maxWidth: 160 }}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>
-                      {log.campaign_id ? `Campaign: ${log.campaign_id}` : '—'}
+                  <td style={{ maxWidth: 220 }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: log.subject ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                      title={log.subject || (log.campaign_id ? `Campaign: ${log.campaign_id}` : '')}>
+                      {log.subject
+                        ? log.subject
+                        : log.campaign_id
+                          ? `Campaign: ${log.campaign_id}`
+                          : '—'}
                     </div>
                   </td>
                   <td>

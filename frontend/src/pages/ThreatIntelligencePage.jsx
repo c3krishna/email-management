@@ -598,12 +598,15 @@ export default function ThreatIntelligencePage() {
           {/* Top threat senders */}
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Top threat senders</span>
+              <span className="card-title">Top threat indicators</span>
+              <span style={{ fontSize:11, color:'var(--text-muted)' }}>
+                Unique indicators · Count = occurrences (not KPI unique count)
+              </span>
             </div>
             <div className="table-wrapper">
               <table>
                 <thead><tr>
-                  <th>Sender</th><th>Type</th><th>Count</th>
+                  <th>Indicator / Subject</th><th>Type</th><th>Occurrences</th>
                 </tr></thead>
                 <tbody>
                   {topThreats.slice(0,8).map((t,i)=>(
