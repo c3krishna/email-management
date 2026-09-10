@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 ============================================================
-Worktual Spam Content Milter
-File: /opt/spam-detector/spam_milter.py
-Deploy: 10.180.0.84 (App Mail server)
+Worktual Spam Content Milter — App (mail.worktual.tech)
+Path: /var/www/email-management/agents-app/spam-milter
+PM2:  spam-milter-app
 
 How it works:
   1. Postfix passes EVERY email through this milter
@@ -13,18 +13,11 @@ How it works:
   5. Decision: ACCEPT / TAG as [SPAM] / REJECT
   6. Push detection to dashboard
 
-Install:
-  pip3 install pymilter requests mysql-connector-python
-  
 Configure Postfix (/etc/postfix/main.cf):
   smtpd_milters = inet:127.0.0.1:8891
   non_smtpd_milters = inet:127.0.0.1:8891
   milter_default_action = accept
   milter_protocol = 6
-
-Run:
-  python3 spam_milter.py
-  pm2 start spam_milter.py --interpreter python3 --name spam-milter
 ============================================================
 """
 

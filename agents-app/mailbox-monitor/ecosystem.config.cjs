@@ -1,13 +1,14 @@
 /**
- * Dashboard-host mailbox monitor (IMAP customer inbox scanning)
- * Run on email-management / virus-rescuers host — NOT on MTA.
+ * App mailbox monitor (IMAP customer inbox scanning)
+ * Prefer dashboard host; App SMTP for alerts.
  *
  * pm2 start ecosystem.config.cjs
+ * Path: /var/www/email-management/agents-app/mailbox-monitor
  */
 module.exports = {
   apps: [
     {
-      name: 'mailbox-monitor',
+      name: 'mailbox-monitor-app',
       script: './mailbox_monitor.py',
       cwd: __dirname,
       interpreter: 'python3',
@@ -27,8 +28,8 @@ module.exports = {
         SMTP_FROM_NAME: process.env.SMTP_FROM_NAME || 'Worktual Security',
         NOTIFY_MIN_CONFIDENCE: process.env.NOTIFY_MIN_CONFIDENCE || '60',
       },
-      out_file: '/var/log/mailbox-monitor/out.log',
-      error_file: '/var/log/mailbox-monitor/error.log',
+      out_file: '/var/log/mailbox-monitor/app-out.log',
+      error_file: '/var/log/mailbox-monitor/app-error.log',
       merge_logs: true,
     },
   ],

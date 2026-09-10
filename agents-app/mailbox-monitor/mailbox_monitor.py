@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-Worktual Mailbox Monitor Agent
-==============================
-Scans customer IMAP inboxes for spam / phishing / junk patterns and
-notifies configured alert emails (monitor.notify_emails + customer
-notification_settings.admin_emails).
+Worktual Mailbox Monitor Agent — App
+====================================
+Path: /var/www/email-management/agents-app/mailbox-monitor
+PM2:  mailbox-monitor-app
 
-Deploy (dashboard server):
-  pm2 start mailbox_monitor.py --interpreter python3 --name mailbox-monitor \\
-      --cwd /opt/email-management/agents/mailbox-monitor
-
-Env: DB_*, SMTP_*, DASHBOARD_URL, AGENT_SECRET, OLLAMA_URL (optional), POLL_INTERVAL
+  pm2 start ecosystem.config.cjs
 """
 
 from __future__ import annotations

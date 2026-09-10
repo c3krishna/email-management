@@ -15,7 +15,7 @@ Dashboard: `email-management.worktual.tech` → API `:5200`
 
 1. **Deploy dashboard** (this repo) with `.env` — no secrets in `ecosystem.config.js`
 2. **Rotate** any secrets that were previously committed in old configs
-3. **Deploy agents on BOTH mail hosts** with `AGENT_SERVER=app` or `campaign`
+3. **Deploy segregated agents** — `agents-app` on App MTA, `agents-campaign` on Campaign MTA (see §3)
 4. **Bind customers** to mail server in UI (Customers → `mail_server`: app / campaign / both)
 5. **Set separate Policies** per Topbar App | Campaign (thresholds differ for bulk vs transactional)
 6. **Smoke-test** quarantine allow, spam tagging, Wazuh clusters, firewall events from both hosts
@@ -110,55 +110,67 @@ Also ensure `email_quarantine` / `app_settings` / `policy_blocklist` exist on **
 
 ---
 
-## 3. Mail server agents (deploy on BOTH)
+## 3. Mail server agents (segregated: agents-app + agents-campaign)
 
-This repo includes ready agent sources under `agents/`:
+Agent sources are split by infrastructure:
 
-- `agents/spam-milter/spam_milter.py` — dual-server aware (`AGENT_SERVER`)
-- `agents/mail-log-agent/log-agent.mjs`
-- `agents/firewall-agent/firewall-agent.mjs`
-- `agents/ecosystem.config.cjs` + `agents/.env.example`
+| Tree | Host | Domain | Path on MTA |
+|------|------|--------|-------------|
+| `agents-app/` | App mail (`10.180.0.84`) | `mail.worktual.tech` | `/var/www/email-management/agents-app` |
+| `agents-campaign/` | Campaign mail (`10.180.0.89`) | `mail.worktual.pl` | `/var/www/email-management/agents-campaign` |
 
-Copy `agents/` to each MTA (e.g. `/opt/email-agents`), set `.env`, then:
+Each tree includes:
+
+- `mail-log-agent/log-agent.mjs`
+- `firewall-agent/firewall-agent.mjs`
+- `spam-milter/spam_milter.py`
+- `mailbox-monitor/` (optional; usually dashboard host)
+- `ecosystem.config.cjs` + `.env.example`
+
+### 3.1 Migrate from old `agents/` on each MTA
 
 ```bash
-export AGENT_SERVER=app   # or campaign
-export AGENT_SECRET=...
-export DASHBOARD_URL=https://email-management.worktual.tech
+# On BOTH mail hosts — stop legacy shared names
+pm2 stop mail-log-agent firewall-agent spam-milter mailbox-monitor 2>/dev/null || true
+pm2 delete mail-log-agent firewall-agent spam-milter mailbox-monitor 2>/dev/null || true
+
+# Pull latest repo under /var/www/email-management
+cd /var/www/email-management && git pull
+
+# App host only (mail.worktual.tech)
+mkdir -p /var/log/email-mgmt /var/log/spam-detector /var/lib/mail-agent-app /var/lib/firewall-agent-app
+cd /var/www/email-management/agents-app
+cp -n .env.example .env   # edit secrets if needed
 pm2 start ecosystem.config.cjs
+pm2 save
+
+# Campaign host only (mail.worktual.pl)
+mkdir -p /var/log/email-mgmt /var/log/spam-detector /var/lib/mail-agent-campaign /var/lib/firewall-agent-campaign
+cd /var/www/email-management/agents-campaign
+cp -n .env.example .env
+pm2 start ecosystem.config.cjs
+pm2 save
 ```
 
-Package sources (from your Downloads) remain valid; prefer the project `agents/spam-milter` build for dual tagging.
+PM2 process names after migrate:
 
-### 3.1 Shared agent env
+| App (`*-app`) | Campaign (`*-campaign`) |
+|---------------|-------------------------|
+| `mail-log-agent-app` | `mail-log-agent-campaign` |
+| `firewall-agent-app` | `firewall-agent-campaign` |
+| `spam-milter-app` | `spam-milter-campaign` |
 
-```env
-DASHBOARD_URL=https://email-management.worktual.tech
-AGENT_SECRET=<same-as-backend>
-AGENT_SERVER=app          # or campaign
-```
-
-### 3.2 App mail host (`10.180.0.84`)
+### 3.2 App mail host (`10.180.0.84` / mail.worktual.tech)
 
 ```env
 AGENT_SERVER=app
 AGENT_SERVER_NAME=mail.worktual.tech
+AGENT_VIP=82.113.72.84
 OWN_IP=10.180.0.84
-OWN_DOMAIN=mail.worktual.tech
+OWN_DOMAIN=worktual.tech
 ```
 
-PM2 examples:
-
-```bash
-# Log agent
-AGENT_SERVER=app pm2 start log-agent.mjs --name mail-log-agent-app
-
-# Firewall agent
-AGENT_SERVER=app pm2 start firewall-agent.mjs --name firewall-agent-app
-
-# Spam milter (Postfix milter on 127.0.0.1:8891)
-AGENT_SERVER=app pm2 start spam_milter.py --interpreter python3 --name spam-milter-app
-```
+Defaults are baked into `agents-app/ecosystem.config.cjs`.
 
 Postfix (`main.cf`):
 
@@ -169,16 +181,18 @@ milter_default_action = accept
 milter_protocol = 6
 ```
 
-### 3.3 Campaign mail host (`10.180.0.89`)
+### 3.3 Campaign mail host (`10.180.0.89` / mail.worktual.pl)
 
 ```env
 AGENT_SERVER=campaign
 AGENT_SERVER_NAME=mail.worktual.pl
+AGENT_VIP=82.113.72.80
 OWN_IP=10.180.0.89
-OWN_DOMAIN=mail.worktual.pl
+OWN_DOMAIN=worktual.pl
+DB_HOST=10.180.0.203
 ```
 
-Same three agents with `AGENT_SERVER=campaign` and distinct PM2 names (`*-campaign`).
+Defaults are baked into `agents-campaign/ecosystem.config.cjs` (domains use `.pl`, not `.tech`).
 
 ### 3.4 Agent → API endpoints
 
@@ -194,8 +208,8 @@ Same three agents with `AGENT_SERVER=campaign` and distinct PM2 names (`*-campai
 
 ### 3.5 Spam milter dual-server note
 
-Set **`AGENT_SERVER`** on each host (`app` or `campaign`).  
-Do **not** hardcode `server: 'app'`.
+Use the correct tree on each host (`agents-app` vs `agents-campaign`).  
+Do **not** run Campaign agents with `AGENT_SERVER=app`.
 
 Milter should:
 

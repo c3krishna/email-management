@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // ============================================================
-// Worktual Firewall Log Agent
-// File: firewall-agent.mjs
-// Deploy: /home/worktual/firewall-agent/ on BOTH mail servers
+// Worktual Firewall Log Agent — App (mail.worktual.tech)
+// Path: /var/www/email-management/agents-app/firewall-agent
+// PM2:  firewall-agent-app
 // Parses: /var/log/iptables.log + /var/log/fail2ban.log
 // Pushes: /api/firewall/events every 30s
-// PM2: pm2 start firewall-agent.mjs --name firewall-agent
 // ============================================================
 
 import fs   from 'fs';
@@ -23,7 +22,7 @@ const OWN_IP        = process.env.OWN_IP          || '10.180.0.84';
 const PUSH_INTERVAL = parseInt(process.env.PUSH_INTERVAL || '30') * 1000;
 const IPTABLES_LOG  = process.env.IPTABLES_LOG    || '/var/log/iptables.log';
 const FAIL2BAN_LOG  = process.env.FAIL2BAN_LOG    || '/var/log/fail2ban.log';
-const STATE_FILE    = process.env.STATE_FILE       || '/var/lib/firewall-agent/state.json';
+const STATE_FILE    = process.env.STATE_FILE       || '/var/lib/firewall-agent-app/state.json';
 
 // ── STATE ───────────────────────────────────────────────────
 let state = { iptables_pos: 0, fail2ban_pos: 0, last_push: 0 };

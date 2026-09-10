@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // ============================================================
-// log-agent.mjs — Worktual Mail Server Log Agent
-// Deploy on: 10.180.0.84 (worktual.tech) and 10.180.0.89 (worktual.pl)
+// log-agent.mjs — App Mail Log Agent (mail.worktual.tech)
+// Path: /var/www/email-management/agents-app/mail-log-agent
+// PM2:  mail-log-agent-app  (see ../ecosystem.config.cjs)
 // Pushes to: https://email-management.worktual.tech/api/agent/ingest
-// Run: pm2 start log-agent.mjs --name mail-log-agent
 // ============================================================
 
 import { createReadStream, statSync, readFileSync, existsSync } from 'fs';
@@ -16,7 +16,7 @@ import http from 'http';
 
 const execAsync = promisify(exec);
 
-// REQUIRED: AGENT_SERVER=app on mail.worktual.tech | AGENT_SERVER=campaign on mail.worktual.pl
+// REQUIRED: AGENT_SERVER=app on mail.worktual.tech (set by ecosystem.config.cjs)
 if (!process.env.AGENT_SERVER || !['app', 'campaign'].includes(process.env.AGENT_SERVER)) {
   console.error('FATAL: set AGENT_SERVER=app|campaign (matches this mail host)');
   process.exit(1);
