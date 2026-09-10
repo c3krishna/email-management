@@ -7,6 +7,7 @@ cd "$ROOT"
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
+  # Values with spaces must be quoted in .env (e.g. SMTP_FROM_NAME="Worktual Security")
   source .env
   set +a
   echo "Loaded .env"
