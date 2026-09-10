@@ -1,0 +1,4 @@
+{
+  "_comment": "Deprecated — use ../../ecosystem.config.cjs + .env (platform-vr-notifier).",
+  "apps": []
+}

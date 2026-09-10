@@ -338,16 +338,44 @@ UI checks:
 
 ---
 
-## 10. virus-rescuers / spam-detector host layout
+## 10. Platform services (dashboard host)
+
+Former `/opt/virus-rescuers`, `/opt/spam-detector`, `/opt/threat-platform` live in-repo:
+
+```text
+backend/platform-services/
+  spam-detector/          # poller (milter stays on MTAs)
+  virus-rescuers/         # connectors, notifier, mailbox_monitor, detection/
+  threat-platform/scripts # archive-old-logs.mjs
+  ecosystem.config.cjs
+  .env.example
+  pm2-migrate.sh
+```
+
+```bash
+cd /var/www/email-management/backend/platform-services
+cp -n .env.example .env   # set secrets
+./pm2-migrate.sh          # replaces legacy PM2 names from /opt
+# daily ops:
+pm2 stop ecosystem.config.cjs
+pm2 start ecosystem.config.cjs
+pm2 restart ecosystem.config.cjs
+```
 
 | Component | Typical host |
 |-----------|----------------|
-| spam_milter | Each MTA |
-| spam_detector poller | Dashboard or AI host — must poll **both** `DB_HOST` and `DB_HOST_CAMPAIGN` |
-| mailbox_monitor | Dashboard / AI host |
-| wazuh_connector | Dashboard / SIEM host (×2 for dual clusters) |
-| universal_connector | Dashboard / AI host |
-| archive-old-logs | Dashboard (cron/PM2) |
+| spam_milter | Each MTA (`agents-app` / `agents-campaign`) |
+| platform-spam-detector | Dashboard host |
+| platform-mailbox-monitor / vr-connector / notifier | Dashboard host |
+| platform-wazuh-connector | Dashboard / SIEM host |
+| platform-archive-logs | Dashboard (PM2 cron monthly) |
+
+Optional compatibility symlinks:
+
+```bash
+ln -sfn /var/www/email-management/backend/platform-services/virus-rescuers /opt/virus-rescuers
+ln -sfn /var/www/email-management/backend/platform-services/spam-detector /opt/spam-detector
+```
 
 ---
 

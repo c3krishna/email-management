@@ -3,3 +3,8 @@
 .env
 *.log
 node_modules/
+backend/platform-services/.env
+# Local drop copies of /opt trees (canonical path is backend/platform-services/)
+/spam-detector/
+/virus-rescuers/
+/threat-platform/

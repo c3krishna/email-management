@@ -1,0 +1,4 @@
+{
+  "_comment": "Deprecated — use ../ecosystem.config.cjs + .env (platform-spam-detector). Do not put passwords here.",
+  "apps": []
+}
