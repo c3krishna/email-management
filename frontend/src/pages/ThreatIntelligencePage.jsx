@@ -945,7 +945,7 @@ export default function ThreatIntelligencePage() {
             <div className="card-header">
               <span className="card-title">🤖 AI Threat Insights</span>
               <span style={{ fontSize:11, color:'var(--text-muted)' }}>
-                Powered by llama3.1:8b on miniai.worktual.tech
+                Powered by Qwen2.5 14B on miniai.worktual.tech
               </span>
             </div>
             <div style={{ display:'grid',

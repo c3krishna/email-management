@@ -181,7 +181,7 @@ export default function EmailValidationAPIPage() {
               gap:10, marginTop:16 }}>
               {[
                 { icon:'🎯', label:'Pattern Matching', desc:'14 built-in threat patterns' },
-                { icon:'🤖', label:'AI Classification', desc:'llama3.1:8b deep analysis' },
+                { icon:'🤖', label:'AI Classification', desc:'Qwen2.5 14B + deepseek-r1:32b' },
                 { icon:'🔍', label:'Typosquat Detection', desc:'Brand impersonation check' },
                 { icon:'🔔', label:'Auto Notification', desc:'Instant admin alerts' },
               ].map((f,i) => (

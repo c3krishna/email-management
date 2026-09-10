@@ -30,7 +30,8 @@ import mysql.connector
 # ── CONFIG ──────────────────────────────────────────────────
 MILTER_SOCKET = os.getenv("MILTER_SOCKET", "inet:8891@127.0.0.1")
 OLLAMA_URL    = os.getenv("OLLAMA_URL",    "http://miniai.worktual.tech:11434")
-AI_MODEL      = os.getenv("AI_MODEL",      "llama3.1:8b")
+# Fast milter path — prefer 7B; override with AI_MODEL if set alone
+AI_MODEL      = os.getenv("AI_MODEL_FAST") or os.getenv("AI_MODEL") or "qwen2.5:7b-instruct-q4_K_M"
 DB_HOST       = os.getenv("DB_HOST",       "10.180.0.84")
 DB_USER       = os.getenv("DB_USER",       "mailmetrics")
 DB_PASS       = os.getenv("DB_PASSWORD",   "WorktualMailMetrics@123")

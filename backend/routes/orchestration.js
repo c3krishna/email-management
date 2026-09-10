@@ -4,8 +4,8 @@
 //
 // Unlike the demo simulation, this ACTUALLY runs a real email
 // through each agent stage using real pattern matching + real
-// AI calls to llama3.1:8b on miniai.worktual.tech, and returns
-// genuine per-agent output — no fake/junk data.
+// AI calls via MiniAI Ollama (aiConfig.js — Qwen2.5 14B /
+// deepseek-r1:32b), and returns genuine per-agent output.
 // ============================================================
 
 const express = require('express');
@@ -27,8 +27,24 @@ function getPool() {
   return pool;
 }
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://miniai.worktual.tech:11434';
-const AI_MODEL   = process.env.AI_MODEL   || 'llama3.1:8b';
+// AI calls to MiniAI Ollama (see ../aiConfig.js), and returns
+const { OLLAMA_URL, AI_MODEL, AI_MODEL_DEEP, AI_MODELS } = require('../aiConfig');
+
+async function ollamaGenerate(model, prompt, options = {}) {
+  const r = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      prompt,
+      stream: false,
+      options: { temperature: 0.05, num_predict: 200, ...options },
+    }),
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!r.ok) throw new Error(`Ollama ${r.status}`);
+  return r.json();
+}
 
 // ── Real pattern rules (same as spam_milter.py) ────────────────
 const PATTERNS = [
@@ -94,17 +110,13 @@ Respond with JSON only:
 {"is_spam": true/false, "spam_type": "phishing/scam/malware/bec/spam/legitimate", "confidence": 0-100, "reason": "one sentence", "mitre": "MITRE ATT&CK technique ID if applicable or null"}`;
 
   try {
-    const r = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        model: AI_MODEL, prompt, stream: false,
-        options: { temperature: 0.05, num_predict: 200 },
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
+    // Prefer deep model for orchestration; fall back to primary
+    let data;
+    try {
+      data = await ollamaGenerate(AI_MODEL_DEEP, prompt, { num_predict: 280 });
+    } catch {
+      data = await ollamaGenerate(AI_MODEL, prompt, { num_predict: 200 });
+    }
     const text = data.response || '';
     const match = text.match(/\{[^}]+\}/s);
     if (!match) return null;
@@ -115,6 +127,7 @@ Respond with JSON only:
       confidence: Math.min(100, Math.max(0, parseInt(parsed.confidence) || 0)),
       reason:     (parsed.reason || '').slice(0, 300),
       mitre:      parsed.mitre || null,
+      model:      data.model || AI_MODEL_DEEP,
     };
   } catch (e) {
     console.error('[orchestration] AI classify error:', e.message);
@@ -277,7 +290,7 @@ router.post('/analyze', verifyToken, async (req, res) => {
     if (shouldRunAI) {
       aiResult = await aiClassify(cleanEvent.subject, cleanEvent.sender, cleanEvent.body);
     }
-    stageEnd('ai-analysis', 'AI Deep Analysis (llama3.1:8b)', '🤖',
+    stageEnd('ai-analysis', `AI Deep Analysis (${AI_MODELS.label} / ${AI_MODEL_DEEP})`, '🤖',
       aiResult ? 'complete' : 'skipped',
       aiResult
         ? (aiResult.is_spam

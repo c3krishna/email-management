@@ -202,7 +202,7 @@ export default function ThreatManagementPage({ server }) {
             <span style={{color:'var(--text-muted)'}}>New indicators: <strong style={{color:'#4ade80'}}>{lastRun.new_indicators}</strong></span>
           </>}
           <span style={{marginLeft:'auto',fontSize:11,color:'var(--text-muted)'}}>
-            Running on miniai.worktual.tech · llama3.1:8b
+            Running on miniai.worktual.tech · Qwen2.5 14B
           </span>
         </div>
       )}

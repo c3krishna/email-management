@@ -210,7 +210,7 @@ export default function SpamAnalysisPage({ server }) {
         <div>
           <div className="section-title">Spam Analysis</div>
           <div className="section-sub">
-            AI-powered spam detection · Pattern matching + Ollama (llama3.1:8b) · Real-time alerts
+            AI-powered spam detection · Pattern matching + Ollama (Qwen2.5 14B / 7B milter) · Real-time alerts
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>

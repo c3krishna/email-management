@@ -27,8 +27,7 @@ function getPool() {
   return pool;
 }
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://miniai.worktual.tech:11434';
-const AI_MODEL   = process.env.AI_MODEL   || 'llama3.1:8b';
+const { OLLAMA_URL, AI_MODEL, AI_MODELS } = require('../aiConfig');
 
 // ── Pattern rules (JS-valid regex, case-insensitive flag) ──────
 const PATTERNS = [

@@ -32,8 +32,7 @@ function getEmailPool() {
   return ePool;
 }
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://miniai.worktual.tech:11434';
-const AI_MODEL   = process.env.AI_MODEL   || 'llama3.1:8b';
+const { OLLAMA_URL, AI_MODEL } = require('../aiConfig');
 
 // ── GET /api/actions/fetch-email-logs?customer_id= ─────────────
 router.get('/fetch-email-logs', verifyToken, async (req, res) => {

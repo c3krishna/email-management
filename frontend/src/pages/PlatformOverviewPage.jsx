@@ -55,7 +55,7 @@ const PIPELINE_STAGES = [
   { icon:'📨', label:'Ingest',    desc:'Any platform, any region — unified via connector layer' },
   { icon:'🎯', label:'Pattern',   desc:'14 rules, <5ms, zero AI cost' },
   { icon:'🔍', label:'Structural',desc:'Typosquat, attachment analysis, QR decode' },
-  { icon:'🤖', label:'AI Deep',   desc:'llama3.1:8b — context, reasoning, MITRE mapping' },
+  { icon:'🤖', label:'AI Deep',   desc:'Qwen2.5 14B + deepseek-r1:32b — threat, BEC, MITRE' },
   { icon:'🔗', label:'Correlate', desc:'Cross-customer pattern matching' },
   { icon:'📊', label:'Score',     desc:'0–100 risk, severity classification' },
   { icon:'🚫', label:'Act',       desc:'Block / Quarantine / Tag / Allow' },
@@ -193,7 +193,7 @@ export default function PlatformOverviewPage({ server = 'app' }) {
           { label:'Customers Protected', value: cust.total || stats.active_customers || '—',  color:C.blue,   icon:'👥' },
           { label:'App today',  value: healthServers.app?.delivery_today ?? '—',      color:C.purple, icon:'📊' },
           { label:'Campaign today', value: healthServers.campaign?.delivery_today ?? '—', color:C.red,    icon:'🚫' },
-          { label:'AI Model',            value:'llama3.1:8b',                  color:C.amber,  icon:'🤖', isText:true },
+          { label:'AI Model',            value:'Qwen2.5 14B',                  color:C.amber,  icon:'🤖', isText:true },
         ].map((k,i)=>(
           <div key={i} style={{ background:C.card, borderRadius:12, padding:'14px 16px',
             border:`1px solid ${k.color}33`, borderTop:`3px solid ${k.color}` }}>

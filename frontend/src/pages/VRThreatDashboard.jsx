@@ -797,9 +797,10 @@ export default function VRThreatDashboard() {
           {/* Models */}
           <div style={{ marginBottom:10 }}>
             {[
-              { model:'llama3.1:8b',    role:'Threat Classification' },
-              { model:'deepseek-r1:32b',role:'Deep Analysis'         },
-              { model:'gemma3:12b',     role:'Pattern Recognition'   },
+              { model:'qwen2.5:14b',     role:'Threat Classification' },
+              { model:'deepseek-r1:32b', role:'Deep Analysis'         },
+              { model:'gemma3:12b',      role:'Pattern Recognition'   },
+              { model:'qwen2.5:7b',      role:'Fast Milter Path'      },
             ].map((m,i) => (
               <div key={i} style={{ display:'flex', alignItems:'center',
                 gap:6, padding:'4px 8px', borderRadius:6, marginBottom:3,
@@ -1215,7 +1216,7 @@ export default function VRThreatDashboard() {
                     <div style={{ padding:'10px 14px', borderRadius:8, marginBottom:14,
                       background:'rgba(124,58,237,0.08)', border:'1px solid rgba(124,58,237,0.3)' }}>
                       <div style={{ fontSize:11, fontWeight:700, color:'#c4b5fd', marginBottom:4 }}>
-                        🤖 AI Check (llama3.1:8b)
+                        🤖 AI Check (Qwen2.5 14B)
                       </div>
                       <div style={{ fontSize:12, color:'#c5d8f5' }}>
                         {actionResult.ai_check.is_spam

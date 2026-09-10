@@ -61,12 +61,18 @@ AGENT_SECRET=<shared-with-all-agents>
 SESSION_EXPIRES=8h
 
 OLLAMA_URL=http://miniai.worktual.tech:11434
+# Primary: spam/phishing/threat/validation · Fast: Postfix milter · Deep: BEC/orchestration
+AI_MODEL=qwen2.5:14b-instruct-q4_K_M
+AI_MODEL_FAST=qwen2.5:7b-instruct-q4_K_M
+AI_MODEL_DEEP=deepseek-r1:32b
+AI_MODEL_PATTERN=gemma3:12b
 
 NOTIFY_SMTP_HOST=mail.worktual.tech
 NOTIFY_SMTP_PORT=25
 NOTIFY_FROM=noreply@worktual.tech
 ```
 
+Models are already on MiniAI (`miniai.worktual.tech:11434`). Override any tag via env if you pull a newer instruct variant.
 Optional: `MAIL_IMAP_*` / `MAIL_SMTP_*` for Inbox page.
 
 ### 2.3 Install & start API
