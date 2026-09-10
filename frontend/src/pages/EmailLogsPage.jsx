@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, Search, Filter, Download, Wifi, WifiOff } from 'lucide-react';
 import axios from 'axios';
+import { decodeEmailSubject } from '../utils/decodeSubject';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use(cfg => {
@@ -93,7 +94,7 @@ export default function EmailLogsPage({ server }) {
     ? logs.filter(l =>
         (l.mail_from || '').includes(search) ||
         (l.mail_to   || '').includes(search) ||
-        (l.subject   || '').toLowerCase().includes(search.toLowerCase()) ||
+        (decodeEmailSubject(l.subject) || '').toLowerCase().includes(search.toLowerCase()) ||
         (l.queue_id  || '').includes(search) ||
         (l.reason    || '').toLowerCase().includes(search.toLowerCase())
       )
@@ -104,7 +105,7 @@ export default function EmailLogsPage({ server }) {
     const rows = filtered.map(l => [
       l.log_datetime, l.event_type, l.direction,
       l.mail_from, l.mail_to,
-      (l.subject || '').replace(/,/g,';'),
+      (decodeEmailSubject(l.subject) || '').replace(/,/g,';'),
       l.status, l.dsn, l.spam_score,
       (l.reason  || '').replace(/,/g,';').replace(/\n/g,' ').slice(0,200),
       l.queue_id
@@ -249,8 +250,8 @@ export default function EmailLogsPage({ server }) {
                         </td>
                         <td style={{ maxWidth: 200 }}>
                           {log.subject ? (
-                            <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12, color:'var(--text-primary)', fontWeight:500 }} title={log.subject}>
-                              {log.subject}
+                            <div style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12, color:'var(--text-primary)', fontWeight:500 }} title={decodeEmailSubject(log.subject)}>
+                              {decodeEmailSubject(log.subject)}
                             </div>
                           ) : (
                             <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>
@@ -309,7 +310,7 @@ export default function EmailLogsPage({ server }) {
                               {log.subject && (
                                 <div style={{ gridColumn:'1 / -1' }}>
                                   <span style={{ color:'var(--text-muted)' }}>Subject:</span><br/>
-                                  <span style={{ color:'var(--text-primary)', fontWeight:500 }}>{log.subject}</span>
+                                  <span style={{ color:'var(--text-primary)', fontWeight:500 }}>{decodeEmailSubject(log.subject)}</span>
                                 </div>
                               )}
                             </div>

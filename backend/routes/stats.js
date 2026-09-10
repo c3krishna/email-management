@@ -8,6 +8,7 @@ const {
   buildDirectionSql,
   istToday,
 } = require('../mailServers');
+const { mapRowsDecodeSubject } = require('../decodeSubject');
 
 let platformPool = null;
 function getPlatformPool() {
@@ -776,7 +777,7 @@ router.get('/recent-logs', async (req, res) => {
       } catch { /* ignore */ }
     }
 
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: mapRowsDecodeSubject(rows) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

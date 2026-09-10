@@ -10,53 +10,10 @@ const router = express.Router();
 const { getPool } = require('../db');
 const { detectVipImpersonation } = require('../vipDetect');
 const { getThreatPool } = require('../threatDb');
+const { decodeRfc2047Subject, mapRowsDecodeSubject } = require('../decodeSubject');
 
+const decodeSubject = decodeRfc2047Subject;
 
-// Decode RFC2047 encoded subjects (=?utf-8?q?...?= or =?utf-8?b?...?=)
-function decodeSubject(subject) {
-  if (!subject) return null;
-  try {
-    // Handle quoted-printable: =?utf-8?q?...?=
-    let decoded = subject.replace(/=\?([^?]+)\?([QqBb])\?([^?]*)\?=/g, (match, charset, encoding, text) => {
-      if (encoding.toUpperCase() === 'Q') {
-        // Quoted-printable
-        const qp = text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (m, hex) =>
-          String.fromCharCode(parseInt(hex, 16))
-        );
-        return Buffer.from(qp, 'latin1').toString('utf8');
-      } else if (encoding.toUpperCase() === 'B') {
-        // Base64
-        return Buffer.from(text, 'base64').toString('utf8');
-      }
-      return text;
-    });
-    return decoded.trim().slice(0, 500);
-  } catch (e) {
-    return subject.slice(0, 500);
-  }
-}
-
-
-// Decode RFC2047 encoded subjects (=?utf-8?q?...?= or =?utf-8?b?...?=)
-function decodeEmailSubject(raw) {
-  if (!raw) return null;
-  try {
-    let s = String(raw);
-    // Handle quoted-printable =?charset?Q?...?=
-    s = s.replace(/=\?([^?]+)\?[Qq]\?([^?]*)\?=/g, (_, charset, text) => {
-      const qp = text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g,
-        (m, hex) => String.fromCharCode(parseInt(hex, 16)));
-      try { return Buffer.from(qp, 'latin1').toString('utf8'); } catch(e) { return qp; }
-    });
-    // Handle base64 =?charset?B?...?=
-    s = s.replace(/=\?([^?]+)\?[Bb]\?([^?]*)\?=/g, (_, charset, text) => {
-      try { return Buffer.from(text, 'base64').toString('utf8'); } catch(e) { return text; }
-    });
-    return s.trim().slice(0, 500) || null;
-  } catch(e) {
-    return String(raw).slice(0, 500);
-  }
-}
 
 const AGENT_SECRET = process.env.AGENT_SECRET;
 const { verifyToken } = require('../middleware/auth');
@@ -228,7 +185,7 @@ router.get('/realtime-logs', verifyToken, async (req, res) => {
       LIMIT ?
     `, [...params, parseInt(limit)]);
 
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: mapRowsDecodeSubject(rows) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -311,19 +268,19 @@ async function processEvent(pool, event, server) {
     }
 
     // Also update subject in email_delivery_details if we have queue_id + subject
-    if (event.subject && event.queue_id) {
+    const decodedSubj = decodeSubject(event.subject);
+    if (decodedSubj && event.queue_id) {
       await pool.query(`
         UPDATE email_delivery_details
         SET subject = ?
-        WHERE queue_id = ? AND (subject IS NULL OR subject = '')
-      `, [event.subject, event.queue_id]).catch(() => {});
+        WHERE queue_id = ? AND (subject IS NULL OR subject = '' OR subject LIKE '=?%')
+      `, [decodedSubj, event.queue_id]).catch(() => {});
 
-      // Also fill mail_from in email_delivery_details
       await pool.query(`
         UPDATE email_log_realtime
         SET subject = ?
-        WHERE queue_id = ? AND (subject IS NULL OR subject = '')
-      `, [event.subject, event.queue_id]).catch(() => {});
+        WHERE queue_id = ? AND (subject IS NULL OR subject = '' OR subject LIKE '=?%')
+      `, [decodedSubj, event.queue_id]).catch(() => {});
     }
     // VIP impersonation check on inbound-looking messages with a From header
     if (event.mail_from && (event.direction === 'inbound' || event.event_type === 'received' || !event.direction)) {
@@ -353,12 +310,14 @@ async function updateSubjects(pool, events) {
 
     for (const event of events) {
       if (!event.subject || !event.queue_id) continue;
+      const decoded = decodeSubject(event.subject);
+      if (!decoded) continue;
       await pool.query(`
         UPDATE email_delivery_details
         SET subject = ?
-        WHERE queue_id = ? AND (subject IS NULL OR subject = '')
+        WHERE queue_id = ? AND (subject IS NULL OR subject = '' OR subject LIKE '=?%')
         LIMIT 10
-      `, [event.subject.slice(0, 500), event.queue_id]);
+      `, [decoded, event.queue_id]);
     }
   } catch (err) {
     console.error('[updateSubjects] Error:', err.message);

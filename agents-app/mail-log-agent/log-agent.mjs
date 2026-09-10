@@ -16,6 +16,56 @@ import http from 'http';
 
 const execAsync = promisify(exec);
 
+/** Decode RFC2047 Subject (=?utf-8?q?...?=) before push */
+function decodeSubject(raw) {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  if (!/=\?[^?]+\?[BbQq]\?/i.test(s)) return s.slice(0, 500);
+  try {
+    s = s.replace(/\?=\s+=\?/g, '?==?');
+    s = s.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_m, _c, enc, text) => {
+      try {
+        if (String(enc).toUpperCase() === 'B') {
+          return Buffer.from(String(text).replace(/\s+/g, ''), 'base64').toString('utf8');
+        }
+        const bytes = [];
+        const qp = String(text).replace(/_/g, ' ');
+        for (let i = 0; i < qp.length; i++) {
+          if (qp[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(qp.slice(i + 1, i + 3))) {
+            bytes.push(parseInt(qp.slice(i + 1, i + 3), 16));
+            i += 2;
+          } else bytes.push(qp.charCodeAt(i) & 0xff);
+        }
+        return Buffer.from(bytes).toString('utf8');
+      } catch { return text; }
+    });
+    const hasOpen = /=\?[^?]+\?[BbQq]\?/i.test(s);
+    const hasComplete = /=\?[^?]+\?[BbQq]\?[^?]*\?=/i.test(s);
+    if (hasOpen && !hasComplete) {
+      s = s.replace(/=\?([^?]+)\?([BbQq])\?([\s\S]*)/i, (_m, _c, enc, text) => {
+        try {
+          if (String(enc).toUpperCase() === 'B') {
+            return Buffer.from(String(text).replace(/\s+/g, ''), 'base64').toString('utf8');
+          }
+          const bytes = [];
+          const qp = String(text).replace(/_/g, ' ');
+          for (let i = 0; i < qp.length; i++) {
+            if (qp[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(qp.slice(i + 1, i + 3))) {
+              bytes.push(parseInt(qp.slice(i + 1, i + 3), 16));
+              i += 2;
+            } else if (qp[i] === '=' && i >= qp.length - 2) break;
+            else bytes.push(qp.charCodeAt(i) & 0xff);
+          }
+          return Buffer.from(bytes).toString('utf8');
+        } catch { return text; }
+      });
+    }
+    return s.replace(/\s+/g, ' ').trim().slice(0, 500) || String(raw).slice(0, 500);
+  } catch {
+    return String(raw).slice(0, 500);
+  }
+}
+
 // REQUIRED: AGENT_SERVER=app on mail.worktual.tech (set by ecosystem.config.cjs)
 if (!process.env.AGENT_SERVER || !['app', 'campaign'].includes(process.env.AGENT_SERVER)) {
   console.error('FATAL: set AGENT_SERVER=app|campaign (matches this mail host)');
@@ -362,7 +412,7 @@ async function getSubject(queueId) {
         { timeout: 3000 }
       );
       if (stdout && stdout.trim()) {
-        return stdout.replace(/^Subject:\s*/i, '').trim().slice(0, 500);
+        return decodeSubject(stdout.replace(/^Subject:\s*/i, '').trim().slice(0, 500));
       }
     } catch (e) {}
 
@@ -372,7 +422,7 @@ async function getSubject(queueId) {
         `grep -a "${queueId}" /var/log/mail.log 2>/dev/null | grep -i "subject" | sed 's/.*[Ss]ubject: //' | head -1`,
         { timeout: 2000 }
       );
-      if (stdout && stdout.trim()) return stdout.trim().slice(0, 500);
+      if (stdout && stdout.trim()) return decodeSubject(stdout.trim().slice(0, 500));
     } catch (e) {}
 
     // Method 3: check spool directories directly
@@ -388,7 +438,7 @@ async function getSubject(queueId) {
           { timeout: 2000 }
         );
         if (stdout && stdout.trim()) {
-          return stdout.replace(/^Subject:\s*/i, '').trim().slice(0, 500);
+          return decodeSubject(stdout.replace(/^Subject:\s*/i, '').trim().slice(0, 500));
         }
       } catch (e) {}
     }

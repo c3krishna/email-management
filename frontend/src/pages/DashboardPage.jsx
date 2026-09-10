@@ -11,6 +11,7 @@ import {
   ChevronDown, Activity
 } from 'lucide-react';
 import { statsApi } from '../utils/api';
+import { decodeEmailSubject } from '../utils/decodeSubject';
 
 // ---- Design tokens ----
 const C = {
@@ -569,9 +570,9 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
                   </td>
                   <td style={{ maxWidth: 220 }}>
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: log.subject ? 'var(--text-primary)' : 'var(--text-muted)' }}
-                      title={log.subject || (log.campaign_id ? `Campaign: ${log.campaign_id}` : '')}>
+                      title={log.subject ? decodeEmailSubject(log.subject) : (log.campaign_id ? `Campaign: ${log.campaign_id}` : '')}>
                       {log.subject
-                        ? log.subject
+                        ? decodeEmailSubject(log.subject)
                         : log.campaign_id
                           ? `Campaign: ${log.campaign_id}`
                           : '—'}
