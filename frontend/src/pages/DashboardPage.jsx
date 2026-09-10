@@ -312,17 +312,35 @@ export default function DashboardPage({ server, range, selectedDate, dateFrom, d
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
-        <KpiCard label="Total Emails"     value={totalEmails}             icon={Mail}         color={C.blue}   vsYesterday={vs.total}       pulse />
-        <KpiCard label="Inbound"          value={summary?.inbound}        icon={Inbox}        color={C.cyan}   sub="Received"               />
-        <KpiCard label="Outbound"         value={summary?.outbound}       icon={Send}         color={C.teal}   sub="Sent"                   />
+        <KpiCard label="Total Emails"     value={totalEmails}             icon={Mail}         color={C.blue}   vsYesterday={vs.total}       pulse sub="All delivery records" />
+        <KpiCard label="Inbound"          value={summary?.inbound}        icon={Inbox}        color={C.cyan}   sub="To us (excl. from us)" />
+        <KpiCard label="Outbound"         value={summary?.outbound}       icon={Send}         color={C.teal}   sub="From our domains"      />
         <KpiCard label="Blocked/Rejected" value={summary?.spam_blocked}   icon={Ban}          color={C.pink}   vsYesterday={vs.spam_blocked} />
         <KpiCard label="Wrong Hits"       value={summary?.wrong_hits}     icon={AlertTriangle} color={C.red}   vsYesterday={vs.wrong_hits}  sub="Failed+Bounced+Invalid" />
         <KpiCard label="Threats"          value={summary?.threats}        icon={Shield}       color={C.purple} sub="Spam/Phish/Malware"     />
       </div>
 
+      {/* Direction check: Inbound + Outbound (+ other) should equal Total */}
+      {totalEmails > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: -4, marginBottom: 4 }}>
+          Direction: Inbound {Number(summary?.inbound || 0).toLocaleString()}
+          {' + '}Outbound {Number(summary?.outbound || 0).toLocaleString()}
+          {Number(summary?.other_direction || 0) > 0 && (
+            <>{' + '}Other {Number(summary.other_direction).toLocaleString()}</>
+          )}
+          {' = '}{(Number(summary?.inbound || 0) + Number(summary?.outbound || 0) + Number(summary?.other_direction || 0)).toLocaleString()}
+          {' · '}Status: Delivered {Number(summary?.success || 0).toLocaleString()}
+          {' + '}Failed {Number(summary?.failed || 0).toLocaleString()}
+          {' + '}Bounced {Number(summary?.bounced || 0).toLocaleString()}
+          {' + '}Deferred {Number(summary?.deferred || 0).toLocaleString()}
+          {' + '}other statuses
+          {' ≈ '}Total {totalEmails.toLocaleString()}
+        </div>
+      )}
+
       {/* ---- KPI Row 2: Delivery metrics ---- */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
-        <KpiCard label="Delivered"     value={summary?.success}    icon={CheckCircle}  color={C.green}  vsYesterday={vs.success}  />
+        <KpiCard label="Delivered"     value={summary?.success}    icon={CheckCircle}  color={C.green}  vsYesterday={vs.success}  sub="Of total records" />
         <KpiCard label="Failed"        value={summary?.failed}     icon={XCircle}      color={C.red}    vsYesterday={vs.failed}   />
         <KpiCard label="Bounced"       value={summary?.bounced}    icon={AlertTriangle} color={C.orange} />
         <KpiCard label="Deferred"      value={summary?.deferred}   icon={Clock}        color={C.yellow} />

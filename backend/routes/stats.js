@@ -50,13 +50,14 @@ function buildRealtimeDateFilter(range, date, from, to) {
 
 async function summarizeFromRealtime(pool, range, date, from, to, server) {
   const { dateFilter, params } = buildRealtimeDateFilter(range, date, from, to);
-  const { outboundSql, inboundSql } = buildDirectionSql(server);
+  const { outboundSql, inboundSql, otherSql } = buildDirectionSql(server);
 
   const [rows] = await pool.query(`
     SELECT
       COUNT(*) AS total,
       ${outboundSql} AS outbound,
       ${inboundSql} AS inbound,
+      ${otherSql} AS other_direction,
       SUM(CASE WHEN status IN ('sent','delivered','ok','2.0.0')
                  OR LOWER(COALESCE(status,'')) IN ('sent','delivered') THEN 1 ELSE 0 END) AS success,
       SUM(CASE WHEN status = 'failed' OR LOWER(COALESCE(status,'')) = 'failed' THEN 1 ELSE 0 END) AS failed,
@@ -372,13 +373,14 @@ router.get('/enhanced-summary', async (req, res) => {
     const server = normalizeServer(req.query.server, 'app');
     const pool = getPool(server);
     const { dateFilter, params } = buildDateFilter(range, date, from, to);
-    const { outboundSql, inboundSql } = buildDirectionSql(server);
+    const { outboundSql, inboundSql, otherSql } = buildDirectionSql(server);
 
     const [today] = await pool.query(`
       SELECT
         COUNT(*) AS total,
         ${outboundSql} AS outbound,
         ${inboundSql} AS inbound,
+        ${otherSql} AS other_direction,
         SUM(CASE WHEN status IN ('sent','delivered') OR delivery_status IN ('sent','delivered')   THEN 1 ELSE 0 END) AS success,
         SUM(CASE WHEN status = 'failed'   OR delivery_status = 'failed'                          THEN 1 ELSE 0 END) AS failed,
         SUM(CASE WHEN status = 'bounced'  OR delivery_status = 'bounced'  OR dsn LIKE '5%'       THEN 1 ELSE 0 END) AS bounced,

@@ -96,7 +96,10 @@ function getOwnedDomains(server) {
 
 /**
  * SQL CASE fragments for inbound/outbound matching owned domains.
- * Matches %@domain and also %@%.domain via LIKE '%@domain%' / '%@%.domain%'.
+ * Directions are mutually exclusive so Inbound + Outbound + Other = Total:
+ *   Outbound — From our domains (priority; typical for MTA send logs)
+ *   Inbound  — To our domains and NOT from our domains
+ *   Other    — Neither (relay / unclassified)
  */
 function buildDirectionSql(server) {
   const domains = getOwnedDomains(server);
@@ -110,10 +113,16 @@ function buildDirectionSql(server) {
   // Broader worktual catch-all for both infrastructures
   fromParts.push(`mail_from LIKE '%@worktual%'`);
   toParts.push(`mail_to LIKE '%@worktual%'`);
+  const fromOwned = `(${fromParts.join(' OR ')})`;
+  const toOwned = `(${toParts.join(' OR ')})`;
   return {
-    outboundSql: `SUM(CASE WHEN ${fromParts.join(' OR ')} THEN 1 ELSE 0 END)`,
-    inboundSql:  `SUM(CASE WHEN ${toParts.join(' OR ')} THEN 1 ELSE 0 END)`,
-    directionCase: `CASE WHEN ${fromParts.join(' OR ')} THEN 'Outbound' ELSE 'Inbound' END`,
+    outboundSql: `SUM(CASE WHEN ${fromOwned} THEN 1 ELSE 0 END)`,
+    // Exclusive: received to us, not also counted as outbound
+    inboundSql:  `SUM(CASE WHEN ${toOwned} AND NOT ${fromOwned} THEN 1 ELSE 0 END)`,
+    otherSql:    `SUM(CASE WHEN NOT ${fromOwned} AND NOT ${toOwned} THEN 1 ELSE 0 END)`,
+    directionCase: `CASE WHEN ${fromOwned} THEN 'Outbound' WHEN ${toOwned} THEN 'Inbound' ELSE 'Other' END`,
+    fromOwned,
+    toOwned,
     domains,
   };
 }
