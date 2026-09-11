@@ -21,6 +21,120 @@ function getPool() {
   return pool;
 }
 
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function toBucketKey(value, bucket) {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    const s = String(value);
+    return bucket === 'hour' ? s.slice(0, 13).replace('T', ' ') : s.slice(0, 10);
+  }
+  const y = d.getFullYear();
+  const m = pad2(d.getMonth() + 1);
+  const day = pad2(d.getDate());
+  if (bucket === 'hour') return `${y}-${m}-${day} ${pad2(d.getHours())}`;
+  return `${y}-${m}-${day}`;
+}
+
+function emptyWaveBucket(key, bucket) {
+  const label = bucket === 'hour' ? `${key.slice(11, 13)}:00` : key.slice(5);
+  return { date: label, bucket: key, phishing: 0, spam: 0, malware: 0, bec: 0, url_threat: 0 };
+}
+
+function buildWaveBuckets(hours, bucket) {
+  const out = [];
+  const end = new Date();
+  end.setMinutes(0, 0, 0);
+  const start = new Date(end);
+  if (bucket === 'hour') start.setHours(end.getHours() - (hours - 1));
+  else start.setDate(end.getDate() - (Math.ceil(hours / 24) - 1));
+  const cur = new Date(start);
+  while (cur <= end) {
+    const key = toBucketKey(cur, bucket);
+    out.push(emptyWaveBucket(key, bucket));
+    if (bucket === 'hour') cur.setHours(cur.getHours() + 1);
+    else cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+function addTrendRows(map, rows, bucket) {
+  for (const row of rows || []) {
+    const key = toBucketKey(row.bucket_at ?? row.date, bucket);
+    if (!key || !map.has(key)) continue;
+    const slot = map.get(key);
+    slot.phishing   += Number(row.phishing || 0);
+    slot.spam       += Number(row.spam || 0);
+    slot.malware    += Number(row.malware || 0);
+    slot.bec        += Number(row.bec || 0);
+    slot.url_threat += Number(row.url_threat || 0);
+  }
+}
+
+async function queryTrend(pool, sql, params) {
+  try {
+    const [rows] = await pool.query(sql, params);
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadThreatWaveform(pool, hours, bucket) {
+  const series = buildWaveBuckets(hours, bucket);
+  const map = new Map(series.map((row) => [row.bucket, row]));
+  const groupExpr = (col) => bucket === 'hour'
+    ? `DATE_FORMAT(${col}, '%Y-%m-%d %H')`
+    : `DATE(${col})`;
+
+  const eventCol = groupExpr('event_datetime');
+  const spamCol  = groupExpr('detected_at');
+  const engCol   = groupExpr('COALESCE(last_seen_at, created_at)');
+
+  const [events, spam, engine] = await Promise.all([
+    queryTrend(pool, `
+      SELECT ${eventCol} AS bucket_at,
+        SUM(CASE WHEN threat_category='phishing' THEN 1 ELSE 0 END) AS phishing,
+        SUM(CASE WHEN threat_category='spam' THEN 1 ELSE 0 END) AS spam,
+        SUM(CASE WHEN threat_category='malware' THEN 1 ELSE 0 END) AS malware,
+        SUM(CASE WHEN threat_category='bec' THEN 1 ELSE 0 END) AS bec,
+        SUM(CASE WHEN threat_category='url_threat' THEN 1 ELSE 0 END) AS url_threat
+      FROM security_events
+      WHERE event_datetime >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        AND threat_category IS NOT NULL
+      GROUP BY ${eventCol}
+    `, [hours]),
+    queryTrend(pool, `
+      SELECT ${spamCol} AS bucket_at,
+        SUM(CASE WHEN spam_type='phishing' THEN 1 ELSE 0 END) AS phishing,
+        SUM(CASE WHEN spam_type='spam' THEN 1 ELSE 0 END) AS spam,
+        SUM(CASE WHEN spam_type='malware' THEN 1 ELSE 0 END) AS malware,
+        SUM(CASE WHEN spam_type='bec' THEN 1 ELSE 0 END) AS bec,
+        SUM(CASE WHEN spam_type IN ('url_threat','scam') THEN 1 ELSE 0 END) AS url_threat
+      FROM spam_detections
+      WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+      GROUP BY ${spamCol}
+    `, [hours]),
+    queryTrend(pool, `
+      SELECT ${engCol} AS bucket_at,
+        SUM(CASE WHEN threat_type IN ('phishing','impersonation') THEN 1 ELSE 0 END) AS phishing,
+        SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
+        SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
+        SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec,
+        SUM(CASE WHEN threat_type='url_threat' THEN 1 ELSE 0 END) AS url_threat
+      FROM threat_indicators
+      WHERE COALESCE(last_seen_at, created_at) >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+      GROUP BY ${engCol}
+    `, [hours]),
+  ]);
+
+  addTrendRows(map, events, bucket);
+  addTrendRows(map, spam, bucket);
+  addTrendRows(map, engine, bucket);
+  return series;
+}
+
 const PLATFORM_INFO = {
   proofpoint: {
     label:       'Proofpoint TAP',
@@ -336,47 +450,14 @@ router.get('/summary', verifyToken, async (req, res) => {
       if (sd) spamDetections = sd;
     } catch { /* optional */ }
 
-    // Real trend: prefer security_events, else spam_detections by day
+    // Waveform: hourly buckets for 24h/2d, daily buckets for 7d/30d.
+    // Sources are summed (connectors + spam milter + AI engine) so the
+    // wave still draws when connector events are empty.
+    const windowHours = Math.min(Math.max(parseInt(hours, 10) || 24, 1), 720);
+    const bucket = windowHours <= 48 ? 'hour' : 'day';
     let threatTrend = [];
     try {
-      const [evTrend] = await p.query(`
-        SELECT DATE(event_datetime) AS date,
-          SUM(CASE WHEN threat_category='phishing' THEN 1 ELSE 0 END) AS phishing,
-          SUM(CASE WHEN threat_category='spam' THEN 1 ELSE 0 END) AS spam,
-          SUM(CASE WHEN threat_category='malware' THEN 1 ELSE 0 END) AS malware,
-          SUM(CASE WHEN threat_category='bec' THEN 1 ELSE 0 END) AS bec
-        FROM security_events
-        WHERE event_datetime >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-          AND threat_category IS NOT NULL
-        GROUP BY DATE(event_datetime) ORDER BY date ASC
-      `);
-      threatTrend = evTrend || [];
-      if (!threatTrend.length) {
-        const [spTrend] = await p.query(`
-          SELECT DATE(detected_at) AS date,
-            SUM(CASE WHEN spam_type='phishing' THEN 1 ELSE 0 END) AS phishing,
-            SUM(CASE WHEN spam_type='spam' THEN 1 ELSE 0 END) AS spam,
-            SUM(CASE WHEN spam_type='malware' THEN 1 ELSE 0 END) AS malware,
-            SUM(CASE WHEN spam_type='bec' THEN 1 ELSE 0 END) AS bec
-          FROM spam_detections
-          WHERE detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-          GROUP BY DATE(detected_at) ORDER BY date ASC
-        `);
-        threatTrend = spTrend || [];
-      }
-      if (!threatTrend.length) {
-        const [engTrend] = await p.query(`
-          SELECT DATE(COALESCE(last_seen_at, created_at)) AS date,
-            SUM(CASE WHEN threat_type IN ('phishing','impersonation') THEN 1 ELSE 0 END) AS phishing,
-            SUM(CASE WHEN threat_type='spam' THEN 1 ELSE 0 END) AS spam,
-            SUM(CASE WHEN threat_type='malware' THEN 1 ELSE 0 END) AS malware,
-            SUM(CASE WHEN threat_type='bec' THEN 1 ELSE 0 END) AS bec
-          FROM threat_indicators
-          WHERE COALESCE(last_seen_at, created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-          GROUP BY DATE(COALESCE(last_seen_at, created_at)) ORDER BY date ASC
-        `);
-        threatTrend = engTrend || [];
-      }
+      threatTrend = await loadThreatWaveform(p, windowHours, bucket);
     } catch { /* ignore */ }
 
     // When connector events are empty, surface engine + spam counts in KPIs
@@ -449,6 +530,7 @@ router.get('/summary', verifyToken, async (req, res) => {
         engine,
         spamDetections,
         threatTrend,
+        threatTrendBucket: bucket,
         byCustomer,
         byPlatform,
         topThreats: topThreats.length ? topThreats : topIndicators,

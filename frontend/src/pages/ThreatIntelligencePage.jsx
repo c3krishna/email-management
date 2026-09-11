@@ -394,15 +394,21 @@ export default function ThreatIntelligencePage() {
 
   // Real trend from API (connectors or spam); fall back to empty series
   const threatTrend = (summary?.threatTrend || []).map(r => ({
-    date: typeof r.date === 'string' ? r.date : (r.date ? String(r.date).slice(0, 10) : ''),
+    date: r.date || '',
     phishing: Number(r.phishing || 0),
     spam:     Number(r.spam || 0),
     malware:  Number(r.malware || 0),
     bec:      Number(r.bec || 0),
+    url_threat: Number(r.url_threat || 0),
   }));
+  const hasWave = threatTrend.some(r =>
+    r.phishing + r.spam + r.malware + r.bec + r.url_threat > 0
+  );
   const trendData = threatTrend.length ? threatTrend : [
-    { date: '—', phishing: 0, spam: 0, malware: 0, bec: 0 },
+    { date: '—', phishing: 0, spam: 0, malware: 0, bec: 0, url_threat: 0 },
   ];
+  const trendLabel = hours <= 24 ? '24 hours' : hours === 48 ? '2 days' : hours === 168 ? '7 days' : '30 days';
+  const trendHint = summary?.threatTrendBucket === 'hour' ? 'hourly' : 'daily';
 
   const pieData = [
     { name:'Phishing',   value:Number(stats.phishing||0),   color:THREAT_COLORS.phishing   },
@@ -500,34 +506,40 @@ export default function ThreatIntelligencePage() {
           {/* Threat trend */}
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Threat trend (7 days)</span>
+              <span className="card-title">Threat trend ({trendLabel})</span>
               <span style={{ fontSize:11, color:'var(--text-muted)' }}>
-                {threatTrend.length ? 'Live · connectors / spam detections' : 'No trend data yet'}
+                {hasWave
+                  ? `Live waveform · ${trendHint} · connectors / spam / engine`
+                  : 'No trend data in this window'}
               </span>
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={trendData} margin={{top:4,right:8,left:-20,bottom:0}}>
                 <defs>
-                  {Object.entries(THREAT_COLORS).slice(0,4).map(([k,c])=>(
+                  {Object.entries(THREAT_COLORS).slice(0,5).map(([k,c])=>(
                     <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={c} stopOpacity={0.3}/>
+                      <stop offset="5%"  stopColor={c} stopOpacity={0.35}/>
                       <stop offset="95%" stopColor={c} stopOpacity={0}/>
                     </linearGradient>
                   ))}
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
-                <XAxis dataKey="date" tick={{fill:'#6e7681',fontSize:10}}/>
+                <XAxis dataKey="date" tick={{fill:'#6e7681',fontSize:10}}
+                  interval={hours <= 24 ? 2 : hours === 48 ? 3 : 0}
+                  minTickGap={12}/>
                 <YAxis tick={{fill:'#6e7681',fontSize:10}} allowDecimals={false}/>
                 <Tooltip contentStyle={TT}/>
                 <Legend wrapperStyle={{fontSize:10}}/>
                 <Area type="monotone" dataKey="phishing" stroke={THREAT_COLORS.phishing}
-                  fill={`url(#g_phishing)`} strokeWidth={2} name="Phishing"/>
+                  fill="url(#g_phishing)" strokeWidth={2} name="Phishing" dot={false} activeDot={{ r: 3 }}/>
                 <Area type="monotone" dataKey="spam"     stroke={THREAT_COLORS.spam}
-                  fill={`url(#g_spam)`}     strokeWidth={2} name="Spam"/>
+                  fill="url(#g_spam)"     strokeWidth={2} name="Spam" dot={false} activeDot={{ r: 3 }}/>
                 <Area type="monotone" dataKey="malware"  stroke={THREAT_COLORS.malware}
-                  fill={`url(#g_malware)`}  strokeWidth={2} name="Malware"/>
+                  fill="url(#g_malware)"  strokeWidth={2} name="Malware" dot={false} activeDot={{ r: 3 }}/>
                 <Area type="monotone" dataKey="bec"      stroke={THREAT_COLORS.bec}
-                  fill={`url(#g_bec)`}      strokeWidth={2} name="BEC"/>
+                  fill="url(#g_bec)"      strokeWidth={2} name="BEC" dot={false} activeDot={{ r: 3 }}/>
+                <Area type="monotone" dataKey="url_threat" stroke={THREAT_COLORS.url_threat}
+                  fill="url(#g_url_threat)" strokeWidth={1.5} name="URL Threat" dot={false} activeDot={{ r: 3 }}/>
               </AreaChart>
             </ResponsiveContainer>
           </div>
