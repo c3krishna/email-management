@@ -1,40 +1,58 @@
 # 📧 Email Management Dashboard
 ### Worktual Innovations — email-management.worktual.tech
 
-Full-stack email delivery monitoring portal for your Postfix + Dovecot + OpenDKIM + Amavis + SpamAssassin stack.
+Full-stack dual-mail operations and AI security console for **App Mail** (`mail.worktual.tech`) and **Campaign** (`mail.worktual.pl`).
+
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/Email-Infra-Management-Application.md](docs/Email-Infra-Management-Application.md) | Complete application document |
+| [docs/Architecture.md](docs/Architecture.md) | Architecture diagrams (Mermaid) |
+| [docs/App-Platform.md](docs/App-Platform.md) | App Mail platform |
+| [docs/Campaign-Platform.md](docs/Campaign-Platform.md) | Campaign platform |
+| [DEPLOY.md](DEPLOY.md) | Dual-server deployment guide |
 
 ---
 
-## 🏗️ Architecture
+## Architecture (summary)
 
 ```
 email-management.worktual.tech (port 443)
          │
     [Nginx reverse proxy]
-    ├── /        → React Frontend (dist/)
+    ├── /        → React Frontend
     └── /api/*   → Node.js API (port 5200)
                          │
-                  [MariaDB 10.180.0.201]
-                  worktual_email_campaign
-                  email_delivery_details
+         ┌───────────────┼───────────────┐
+         ▼               ▼               ▼
+   App email DB    Campaign email DB   threat_platform
+   10.180.0.84     10.180.0.203        (typically 10.180.0.84)
+   worktual_email_campaign (same DB name, two hosts)
 ```
+
+Topbar **App Mail | Campaign** selects which email metrics pool to query. Agents on each MTA push logs with `X-Agent-Server`.
+
+See [docs/Architecture.md](docs/Architecture.md) for full diagrams.
 
 ---
 
-## 📦 Stack
+## Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 18, Recharts, Lucide Icons, Vite |
 | Backend | Node.js + Express, mysql2, nodemailer |
-| Database | MariaDB (read-only on `worktual_email_campaign`) |
+| Database | MariaDB dual pools + `threat_platform` |
 | Reverse Proxy | Nginx |
 | Process Manager | PM2 |
+| AI | Ollama on MiniAI (`miniai.worktual.tech`) |
 | SSL | Let's Encrypt (certbot) |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Backend
 ```bash
@@ -55,19 +73,14 @@ npm run dev                 # http://localhost:3000
 ```bash
 cd frontend
 VITE_API_URL=/api npm run build
-# Copy dist/ to /var/www/email-management/dist/
+# Point Nginx root at frontend/dist (see DEPLOY.md)
 ```
 
-### 4. MariaDB User (run on 10.180.0.201)
-```sql
-CREATE USER 'email_mgmt_user'@'APP_SERVER_IP' IDENTIFIED BY 'STRONG_PASSWORD';
-GRANT SELECT ON worktual_email_campaign.email_delivery_details TO 'email_mgmt_user'@'APP_SERVER_IP';
-FLUSH PRIVILEGES;
-```
+Prefer [DEPLOY.md](DEPLOY.md) for dual-server `.env` (`DB_HOST`, `DB_HOST_CAMPAIGN`, agents, platform-services).
 
 ---
 
-## 📊 Dashboard Features
+## Dashboard Features
 
 ### 1. Dashboard Overview
 - KPI cards: Total / Success / Failed / Bounced / Deferred / Timed Out / Spam Blocked / Invalid / Processing
